@@ -41,6 +41,10 @@ final class AppModel: ObservableObject {
         music.onNowPlayingChanged = { [weak self] np in
             self?.multipeer.send(Packet(command: nil, nowPlaying: np))
         }
+        // 볼륨이 실제 반영된 뒤에야 정확한 값을 다시 전송
+        volume.onVolumeApplied = { [weak self] in
+            self?.music.publishSoon()
+        }
         // 연결되면 현재 상태를 즉시 한 번 보냄(플레이어 측)
         multipeer.$isConnected
             .removeDuplicates()
@@ -88,10 +92,11 @@ final class AppModel: ObservableObject {
         case .playPause:  music.togglePlayPause()
         case .next:       music.next()
         case .prev:       music.prev()
-        case .volumeUp:   volume.changeVolume(by: 0.0625); music.publish()
-        case .volumeDown: volume.changeVolume(by: -0.0625); music.publish()
+        // 볼륨 명령은 실제 반영 후 volume.onVolumeApplied → publishSoon 으로 전송됨
+        case .volumeUp:   volume.changeVolume(by: 0.0625)
+        case .volumeDown: volume.changeVolume(by: -0.0625)
         case .setVolume:
-            if let v = cmd.volume { volume.setVolume(v); music.publish() }
+            if let v = cmd.volume { volume.setVolume(v) }
         }
     }
 }

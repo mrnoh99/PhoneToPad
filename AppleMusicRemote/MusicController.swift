@@ -71,7 +71,7 @@ final class MusicController: ObservableObject {
     }
 
     /// 명령 직후엔 상태 반영이 약간 늦으므로 살짝 지연 후 publish
-    private func publishSoon() {
+    func publishSoon() {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) { [weak self] in
             self?.publish()
         }

@@ -18,12 +18,16 @@ final class VolumeController: ObservableObject {
         AVAudioSession.sharedInstance().outputVolume
     }
 
+    /// 슬라이더로 실제 볼륨을 적용한 뒤 호출(반영된 값을 다시 publish 하기 위함)
+    var onVolumeApplied: (() -> Void)?
+
     func setVolume(_ value: Float) {
         let v = max(0, min(1, value))
         // 슬라이더가 뷰 계층에 붙은 뒤 동작하므로 짧게 지연
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
             self.slider?.value = v
             self.slider?.sendActions(for: .valueChanged)
+            self.onVolumeApplied?()
         }
     }
 
