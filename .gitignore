@@ -1,0 +1,10 @@
+# XcodeGen 결과물 (project.yml 로 재생성)
+*.xcodeproj
+
+# Xcode / Swift
+.DS_Store
+xcuserdata/
+*.xcworkspace
+DerivedData/
+build/
+.swiftpm/

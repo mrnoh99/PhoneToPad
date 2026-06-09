@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>CFBundleDisplayName</key>
+	<string>PhoneToPad</string>
+	<key>CFBundleShortVersionString</key>
+	<string>$(MARKETING_VERSION)</string>
+	<key>CFBundleVersion</key>
+	<string>$(CURRENT_PROJECT_VERSION)</string>
+
+	<!-- systemMusicPlayer / 미디어 라이브러리 접근 (플레이어=아이패드 측) -->
+	<key>NSAppleMusicUsageDescription</key>
+	<string>아이패드에서 재생 중인 음악 정보를 읽고 재생을 제어하기 위해 미디어 라이브러리 접근이 필요합니다.</string>
+
+	<!-- MultipeerConnectivity 로컬 네트워크 -->
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>같은 WiFi의 다른 기기(아이폰/아이패드)와 연결해 음악을 원격 제어하기 위해 로컬 네트워크 접근이 필요합니다.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_ammusic-rc._tcp</string>
+		<string>_ammusic-rc._udp</string>
+	</array>
+
+	<key>UILaunchScreen</key>
+	<dict/>
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+</dict>
+</plist>
