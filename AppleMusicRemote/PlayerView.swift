@@ -53,5 +53,9 @@ struct PlayerView: View {
             VolumeMountView(controller: app.volume)
                 .frame(width: 1, height: 1)
         )
+        // 플레이어/중계 화면이 떠 있는 동안엔 화면 자동 잠금을 끈다.
+        // (화면이 꺼지면 앱이 백그라운드로 가 MultipeerConnectivity 연결이 끊기기 때문)
+        .onAppear { UIApplication.shared.isIdleTimerDisabled = true }
+        .onDisappear { UIApplication.shared.isIdleTimerDisabled = false }
     }
 }
