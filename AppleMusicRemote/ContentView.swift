@@ -88,9 +88,10 @@ struct RolePickerView: View {
     }
 }
 
-/// 현재 곡 카드(앨범아트 + 제목/아티스트) — 양쪽에서 공용
+/// 현재 곡 카드(앨범아트 + 제목/아티스트) — 양쪽에서 공용. artSize 로 앨범아트 크기를 조절.
 struct NowPlayingCard: View {
     let np: NowPlayingMessage
+    var artSize: CGFloat = 260
 
     var body: some View {
         VStack(spacing: 12) {
@@ -98,12 +99,12 @@ struct NowPlayingCard: View {
                 Image(uiImage: ui)
                     .resizable()
                     .scaledToFit()
-                    .frame(maxWidth: 260, maxHeight: 260)
+                    .frame(maxWidth: artSize, maxHeight: artSize)
                     .clipShape(RoundedRectangle(cornerRadius: 14))
             } else {
                 RoundedRectangle(cornerRadius: 14)
                     .fill(Color.white.opacity(0.06))
-                    .frame(width: 260, height: 260)
+                    .frame(width: artSize, height: artSize)
                     .overlay(RoundedRectangle(cornerRadius: 14)
                         .stroke(Color.white.opacity(0.1), lineWidth: 1))
                     .overlay(
