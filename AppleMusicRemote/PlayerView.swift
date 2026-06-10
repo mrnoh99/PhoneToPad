@@ -54,9 +54,12 @@ struct PlayerView: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(.tint)
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
-        .background(.bar)   // 시스템 바 머티리얼 (얇은 상태바 느낌)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+        .background(Color.white.opacity(0.05))   // 블랙 위 아주 옅은 바
+        .overlay(alignment: .bottom) {           // 하단 헤어라인 구분선
+            Rectangle().fill(Color.white.opacity(0.1)).frame(height: 0.5)
+        }
     }
 
     /// 한 줄에 들어갈 "제목 · 아티스트" 문자열

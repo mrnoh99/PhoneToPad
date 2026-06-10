@@ -4,6 +4,15 @@ struct ContentView: View {
     @EnvironmentObject var app: AppModel
 
     var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()   // 미니멀 블랙 베이스
+            roleContent
+        }
+        .preferredColorScheme(.dark)        // 항상 다크 모드
+        .tint(.white)                       // 단색(화이트) 액센트
+    }
+
+    @ViewBuilder private var roleContent: some View {
         switch app.role {
         case .unset:
             RolePickerView()
@@ -23,22 +32,30 @@ struct RolePickerView: View {
         VStack(spacing: 28) {
             Spacer()
             Image(systemName: "music.note.list")
-                .font(.system(size: 60))
-                .foregroundStyle(.pink)
+                .font(.system(size: 56, weight: .thin))
+                .foregroundStyle(.white)
             Text("PhoneToPad")
-                .font(.largeTitle.bold())
+                .font(.largeTitle.weight(.semibold))
+                .tracking(1)
             Text("이 기기의 역할을 선택하세요")
                 .foregroundStyle(.secondary)
 
             // 페어링 코드(PIN): 두 기기에 같은 값을 입력하면 그 둘끼리만 연결된다.
-            VStack(spacing: 6) {
+            VStack(spacing: 8) {
                 HStack(spacing: 8) {
-                    Image(systemName: "lock.fill").foregroundStyle(.secondary)
+                    Image(systemName: "lock.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
                     TextField("페어링 코드 (선택)", text: $app.pairingCode)
-                        .textFieldStyle(.roundedBorder)
                         .keyboardType(.numberPad)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 200)
+                        .padding(.vertical, 10)
+                        .padding(.horizontal, 14)
+                        .background(Color.white.opacity(0.06),
+                                    in: RoundedRectangle(cornerRadius: 10))
+                        .overlay(RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.white.opacity(0.12), lineWidth: 1))
                 }
                 Text("두 기기에 같은 코드를 입력하세요. 비워두면 같은 앱끼리 연결됩니다.")
                     .font(.caption2)
@@ -47,24 +64,11 @@ struct RolePickerView: View {
             }
             .padding(.horizontal, 32)
 
-            VStack(spacing: 14) {
-                Button {
-                    app.startPlayer()
-                } label: {
-                    Label("이 기기에서 음악 재생 (아이패드)", systemImage: "ipad")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.borderedProminent)
-
-                Button {
-                    app.startRemote()
-                } label: {
-                    Label("리모컨으로 사용 (아이폰)", systemImage: "iphone")
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 6)
-                }
-                .buttonStyle(.bordered)
+            VStack(spacing: 12) {
+                RoleButton(title: "이 기기에서 음악 재생 (아이패드)",
+                           systemImage: "ipad", filled: true) { app.startPlayer() }
+                RoleButton(title: "리모컨으로 사용 (아이폰)",
+                           systemImage: "iphone", filled: false) { app.startRemote() }
             }
             .padding(.horizontal, 32)
 
@@ -98,23 +102,53 @@ struct NowPlayingCard: View {
                     .clipShape(RoundedRectangle(cornerRadius: 14))
             } else {
                 RoundedRectangle(cornerRadius: 14)
-                    .fill(Color.gray.opacity(0.2))
+                    .fill(Color.white.opacity(0.06))
                     .frame(width: 260, height: 260)
+                    .overlay(RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.white.opacity(0.1), lineWidth: 1))
                     .overlay(
                         Image(systemName: "music.note")
-                            .font(.system(size: 48))
+                            .font(.system(size: 44, weight: .thin))
                             .foregroundStyle(.secondary)
                     )
             }
             Text(np.title)
-                .font(.title3.bold())
+                .font(.title3.weight(.semibold))
+                .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
             if !np.artist.isEmpty {
                 Text(np.artist).foregroundStyle(.secondary)
             }
             if !np.album.isEmpty {
-                Text(np.album).font(.footnote).foregroundStyle(.secondary)
+                Text(np.album).font(.footnote).foregroundStyle(.tertiary)
             }
         }
+    }
+}
+
+/// 역할 선택용 미니멀 버튼 — 채움(흰색) 또는 외곽선(다크) 두 스타일
+private struct RoleButton: View {
+    let title: String
+    let systemImage: String
+    let filled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: systemImage)
+                .font(.callout.weight(.medium))
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .foregroundStyle(filled ? Color.black : Color.white)
+                .background(
+                    RoundedRectangle(cornerRadius: 14)
+                        .fill(filled ? Color.white : Color.white.opacity(0.06))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 14)
+                        .stroke(Color.white.opacity(filled ? 0 : 0.18), lineWidth: 1)
+                )
+        }
+        .buttonStyle(.plain)
     }
 }
