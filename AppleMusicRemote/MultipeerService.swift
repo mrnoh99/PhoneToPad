@@ -3,8 +3,12 @@ import MultipeerConnectivity
 import UIKit
 
 /// 같은 WiFi 의 두 기기를 자동으로 찾아 연결하고, Packet 을 주고받는다.
-/// 양쪽 모두 advertise + browse 하되, displayName 비교로 한쪽만 초대를 보내
-/// 중복 연결을 피한다.
+///
+/// 연결 정책
+/// - **공유 토큰**: 같은 앱·같은 페어링 토큰을 가진 기기끼리만 연결(타인/무관 기기 차단)
+/// - **역할 페어링**: player ↔ remote 처럼 역할이 서로 보완될 때만 연결(둘 다 player 등은 무시)
+/// - **이중 연결 방지**: 양쪽이 동시에 초대하지 않도록 displayName 이 큰 쪽만 초대
+/// - **자동 재연결**: 끊기면 잠시 후 탐색을 재시작하고, 앱이 다시 활성화될 때도 재시도
 final class MultipeerService: NSObject, ObservableObject {
 
     @Published var isConnected: Bool = false
@@ -16,12 +20,22 @@ final class MultipeerService: NSObject, ObservableObject {
     var onNowPlaying: ((NowPlayingMessage) -> Void)?
 
     private let serviceType = "ammusic-rc"
+    /// 같은 페어링끼리만 연결되도록 하는 공유 비밀(버전 접미사로 호환성 관리)
+    private let pairToken = "ptp-v1"
+
     // 두 기기 이름이 같아도(예: 둘 다 "iPad") 정렬·식별이 되도록 고유 접미사를 붙임
     private let myPeerID = MCPeerID(
         displayName: "\(UIDevice.current.name)#\(String(UUID().uuidString.prefix(4)))")
     private var session: MCSession!
     private var advertiser: MCNearbyServiceAdvertiser?
     private var browser: MCNearbyServiceBrowser?
+
+    /// 이 기기의 현재 역할(탐색·초대 판단에 사용)
+    private var myRole: DeviceRole = .unset
+    /// 토큰·역할 검증을 통과한, 연결 후보 peer 들(재연결 시 재초대 대상)
+    private var discovered: Set<MCPeerID> = []
+
+    private var tokenContext: Data { Data(pairToken.utf8) }
 
     override init() {
         super.init()
@@ -31,10 +45,15 @@ final class MultipeerService: NSObject, ObservableObject {
         session.delegate = self
     }
 
-    func start() {
+    // MARK: - 시작/정지
+    func start(role: DeviceRole) {
         stop()  // 중복 방지
+        myRole = role
+
+        // 토큰 + 역할을 광고에 실어, 상대가 검증·매칭할 수 있게 한다.
+        let info = ["token": pairToken, "role": role.rawValue]
         advertiser = MCNearbyServiceAdvertiser(peer: myPeerID,
-                                               discoveryInfo: nil,
+                                               discoveryInfo: info,
                                                serviceType: serviceType)
         advertiser?.delegate = self
         advertiser?.startAdvertisingPeer()
@@ -49,7 +68,19 @@ final class MultipeerService: NSObject, ObservableObject {
         browser?.stopBrowsingForPeers()
         advertiser = nil
         browser = nil
+        discovered.removeAll()
         session.disconnect()
+        myRole = .unset
+    }
+
+    /// 앱이 다시 활성화(foreground)될 때 호출 — 끊겨 있으면 탐색을 재시작한다.
+    func wakeUp() {
+        guard myRole != .unset, session.connectedPeers.isEmpty else { return }
+        if advertiser == nil || browser == nil {
+            start(role: myRole)
+        } else {
+            restartDiscovery()
+        }
     }
 
     func send(_ packet: Packet) {
@@ -60,6 +91,41 @@ final class MultipeerService: NSObject, ObservableObject {
         } catch {
             print("[MP] send 실패: \(error)")
         }
+    }
+
+    // MARK: - 내부
+    /// 상대 역할이 내 역할과 보완 관계(player↔remote)인지
+    private func isComplementaryRole(_ otherRole: String?) -> Bool {
+        switch myRole {
+        case .player: return otherRole == DeviceRole.remote.rawValue
+        case .remote: return otherRole == DeviceRole.player.rawValue
+        case .unset:  return false
+        }
+    }
+
+    /// 이중 연결 방지 규칙(더 큰 displayName 쪽만 초대) + 미연결 상태일 때만 초대
+    private func inviteIfNeeded(_ peerID: MCPeerID) {
+        guard myPeerID.displayName > peerID.displayName else { return }
+        guard !session.connectedPeers.contains(peerID) else { return }
+        browser?.invitePeer(peerID, to: session, withContext: tokenContext, timeout: 15)
+    }
+
+    /// 끊긴 뒤 일정 시간 후 여전히 미연결이면 탐색을 재시작
+    private func scheduleRediscovery() {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+            guard let self, self.myRole != .unset else { return }
+            guard self.session.connectedPeers.isEmpty else { return }  // 이미 재연결됐으면 패스
+            self.restartDiscovery()
+        }
+    }
+
+    /// advertise/browse 를 새로 시작해 fresh 한 발견 이벤트를 강제 → 재초대 트리거
+    private func restartDiscovery() {
+        discovered.removeAll()
+        browser?.stopBrowsingForPeers()
+        advertiser?.stopAdvertisingPeer()
+        advertiser?.startAdvertisingPeer()
+        browser?.startBrowsingForPeers()
     }
 
     private func updateConnectionState() {
@@ -78,6 +144,9 @@ final class MultipeerService: NSObject, ObservableObject {
 extension MultipeerService: MCSessionDelegate {
     func session(_ session: MCSession, peer peerID: MCPeerID, didChange state: MCSessionState) {
         updateConnectionState()
+        if state == .notConnected {
+            DispatchQueue.main.async { [weak self] in self?.scheduleRediscovery() }
+        }
     }
 
     func session(_ session: MCSession, didReceive data: Data, fromPeer peerID: MCPeerID) {
@@ -97,23 +166,32 @@ extension MultipeerService: MCNearbyServiceAdvertiserDelegate {
                     didReceiveInvitationFromPeer peerID: MCPeerID,
                     withContext context: Data?,
                     invitationHandler: @escaping (Bool, MCSession?) -> Void) {
-        // 동일 소유자 기기이므로 무조건 수락
-        invitationHandler(true, session)
+        // 공유 토큰이 일치하는 초대만 수락(타인/무관 기기 차단)
+        let token = context.flatMap { String(data: $0, encoding: .utf8) }
+        let accept = (token == pairToken)
+        invitationHandler(accept, accept ? session : nil)
     }
 }
 
-// MARK: - Browser (한쪽만 초대)
+// MARK: - Browser (토큰·역할 검증 후 한쪽만 초대)
 extension MultipeerService: MCNearbyServiceBrowserDelegate {
     func browser(_ browser: MCNearbyServiceBrowser,
                  foundPeer peerID: MCPeerID,
                  withDiscoveryInfo info: [String : String]?) {
-        // displayName 이 더 큰 쪽만 초대를 보내 양쪽 동시 초대 충돌을 방지
-        if myPeerID.displayName > peerID.displayName {
-            browser.invitePeer(peerID, to: session, withContext: nil, timeout: 15)
+        // 같은 토큰 + 보완 역할일 때만 연결 후보로 인정
+        guard info?["token"] == pairToken,
+              isComplementaryRole(info?["role"]) else { return }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.discovered.insert(peerID)
+            self.inviteIfNeeded(peerID)
         }
     }
 
     func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
-        updateConnectionState()
+        DispatchQueue.main.async { [weak self] in
+            self?.discovered.remove(peerID)
+            self?.updateConnectionState()
+        }
     }
 }

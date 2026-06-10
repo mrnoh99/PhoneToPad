@@ -58,13 +58,13 @@ final class AppModel: ObservableObject {
     // MARK: - 역할 시작
     func startPlayer() {
         role = .player
-        multipeer.start()
+        multipeer.start(role: .player)
         music.requestAuthAndStart()
     }
 
     func startRemote() {
         role = .remote
-        multipeer.start()
+        multipeer.start(role: .remote)
     }
 
     func resetRole() {
