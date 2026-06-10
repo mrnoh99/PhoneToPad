@@ -30,6 +30,23 @@ struct RolePickerView: View {
             Text("이 기기의 역할을 선택하세요")
                 .foregroundStyle(.secondary)
 
+            // 페어링 코드(PIN): 두 기기에 같은 값을 입력하면 그 둘끼리만 연결된다.
+            VStack(spacing: 6) {
+                HStack(spacing: 8) {
+                    Image(systemName: "lock.fill").foregroundStyle(.secondary)
+                    TextField("페어링 코드 (선택)", text: $app.pairingCode)
+                        .textFieldStyle(.roundedBorder)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 200)
+                }
+                Text("두 기기에 같은 코드를 입력하세요. 비워두면 같은 앱끼리 연결됩니다.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+            }
+            .padding(.horizontal, 32)
+
             VStack(spacing: 14) {
                 Button {
                     app.startPlayer()

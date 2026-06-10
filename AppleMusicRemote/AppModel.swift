@@ -13,6 +13,10 @@ final class AppModel: ObservableObject {
     @Published var role: DeviceRole {
         didSet { UserDefaults.standard.set(role.rawValue, forKey: "role") }
     }
+    /// 두 기기에 같은 값을 입력하면 그 코드끼리만 연결되는 페어링 코드(PIN). 비우면 같은 앱끼리 연결.
+    @Published var pairingCode: String {
+        didSet { UserDefaults.standard.set(pairingCode, forKey: "pairingCode") }
+    }
     /// 리모컨 측에서 표시할, 플레이어가 보내온 현재 곡 정보
     @Published var nowPlaying: NowPlayingMessage?
 
@@ -25,6 +29,7 @@ final class AppModel: ObservableObject {
     init() {
         let saved = UserDefaults.standard.string(forKey: "role") ?? DeviceRole.unset.rawValue
         role = DeviceRole(rawValue: saved) ?? .unset
+        pairingCode = UserDefaults.standard.string(forKey: "pairingCode") ?? ""
         wire()
     }
 
@@ -58,13 +63,13 @@ final class AppModel: ObservableObject {
     // MARK: - 역할 시작
     func startPlayer() {
         role = .player
-        multipeer.start(role: .player)
+        multipeer.start(role: .player, code: pairingCode)
         music.requestAuthAndStart()
     }
 
     func startRemote() {
         role = .remote
-        multipeer.start(role: .remote)
+        multipeer.start(role: .remote, code: pairingCode)
     }
 
     func resetRole() {

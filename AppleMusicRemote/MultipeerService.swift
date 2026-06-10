@@ -1,11 +1,14 @@
 import Foundation
 import MultipeerConnectivity
 import UIKit
+import CryptoKit
 
-/// 같은 WiFi 의 두 기기를 자동으로 찾아 연결하고, Packet 을 주고받는다.
+/// 같은 WiFi/근거리의 두 기기를 자동으로 찾아 연결하고, Packet 을 주고받는다.
 ///
 /// 연결 정책
-/// - **공유 토큰**: 같은 앱·같은 페어링 토큰을 가진 기기끼리만 연결(타인/무관 기기 차단)
+/// - **페어링 코드(PIN)**: 사용자가 두 기기에 같은 코드를 입력하면 그 코드끼리만 연결된다.
+///   코드는 그대로 방송하지 않고 SHA256 해시로 변환해 토큰으로 사용(노출 최소화).
+///   코드가 비어 있으면 기본 토큰으로 "같은 앱끼리" 연결(이전 동작과 호환).
 /// - **역할 페어링**: player ↔ remote 처럼 역할이 서로 보완될 때만 연결(둘 다 player 등은 무시)
 /// - **이중 연결 방지**: 양쪽이 동시에 초대하지 않도록 displayName 이 큰 쪽만 초대
 /// - **자동 재연결**: 끊기면 잠시 후 탐색을 재시작하고, 앱이 다시 활성화될 때도 재시도
@@ -20,8 +23,6 @@ final class MultipeerService: NSObject, ObservableObject {
     var onNowPlaying: ((NowPlayingMessage) -> Void)?
 
     private let serviceType = "ammusic-rc"
-    /// 같은 페어링끼리만 연결되도록 하는 공유 비밀(버전 접미사로 호환성 관리)
-    private let pairToken = "ptp-v1"
 
     // 두 기기 이름이 같아도(예: 둘 다 "iPad") 정렬·식별이 되도록 고유 접미사를 붙임
     private let myPeerID = MCPeerID(
@@ -32,8 +33,10 @@ final class MultipeerService: NSObject, ObservableObject {
 
     /// 이 기기의 현재 역할(탐색·초대 판단에 사용)
     private var myRole: DeviceRole = .unset
-    /// 토큰·역할 검증을 통과한, 연결 후보 peer 들(재연결 시 재초대 대상)
-    private var discovered: Set<MCPeerID> = []
+    /// 현재 페어링 코드(재연결 시 동일 코드로 재시작하기 위해 보관)
+    private var myCode: String = ""
+    /// 코드에서 파생된 연결 토큰(같은 값끼리만 연결)
+    private var pairToken: String = ""
 
     private var tokenContext: Data { Data(pairToken.utf8) }
 
@@ -45,10 +48,21 @@ final class MultipeerService: NSObject, ObservableObject {
         session.delegate = self
     }
 
+    /// 페어링 코드 → 토큰(SHA256 앞 16자리). 코드가 비면 기본 토큰.
+    private func makeToken(code: String) -> String {
+        let trimmed = code.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return "ptp-v1-default" }
+        let digest = SHA256.hash(data: Data("ptp-v1:\(trimmed)".utf8))
+        let hex = digest.map { String(format: "%02x", $0) }.joined()
+        return "ptp-v1-" + String(hex.prefix(16))
+    }
+
     // MARK: - 시작/정지
-    func start(role: DeviceRole) {
+    func start(role: DeviceRole, code: String) {
         stop()  // 중복 방지
         myRole = role
+        myCode = code
+        pairToken = makeToken(code: code)
 
         // 토큰 + 역할을 광고에 실어, 상대가 검증·매칭할 수 있게 한다.
         let info = ["token": pairToken, "role": role.rawValue]
@@ -68,7 +82,6 @@ final class MultipeerService: NSObject, ObservableObject {
         browser?.stopBrowsingForPeers()
         advertiser = nil
         browser = nil
-        discovered.removeAll()
         session.disconnect()
         myRole = .unset
     }
@@ -77,7 +90,7 @@ final class MultipeerService: NSObject, ObservableObject {
     func wakeUp() {
         guard myRole != .unset, session.connectedPeers.isEmpty else { return }
         if advertiser == nil || browser == nil {
-            start(role: myRole)
+            start(role: myRole, code: myCode)
         } else {
             restartDiscovery()
         }
@@ -121,7 +134,6 @@ final class MultipeerService: NSObject, ObservableObject {
 
     /// advertise/browse 를 새로 시작해 fresh 한 발견 이벤트를 강제 → 재초대 트리거
     private func restartDiscovery() {
-        discovered.removeAll()
         browser?.stopBrowsingForPeers()
         advertiser?.stopAdvertisingPeer()
         advertiser?.startAdvertisingPeer()
@@ -166,7 +178,7 @@ extension MultipeerService: MCNearbyServiceAdvertiserDelegate {
                     didReceiveInvitationFromPeer peerID: MCPeerID,
                     withContext context: Data?,
                     invitationHandler: @escaping (Bool, MCSession?) -> Void) {
-        // 공유 토큰이 일치하는 초대만 수락(타인/무관 기기 차단)
+        // 공유 토큰(=같은 페어링 코드)이 일치하는 초대만 수락
         let token = context.flatMap { String(data: $0, encoding: .utf8) }
         let accept = (token == pairToken)
         invitationHandler(accept, accept ? session : nil)
@@ -178,19 +190,16 @@ extension MultipeerService: MCNearbyServiceBrowserDelegate {
     func browser(_ browser: MCNearbyServiceBrowser,
                  foundPeer peerID: MCPeerID,
                  withDiscoveryInfo info: [String : String]?) {
-        // 같은 토큰 + 보완 역할일 때만 연결 후보로 인정
+        // 같은 토큰(코드) + 보완 역할일 때만 연결 후보로 인정
         guard info?["token"] == pairToken,
               isComplementaryRole(info?["role"]) else { return }
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
-            self.discovered.insert(peerID)
-            self.inviteIfNeeded(peerID)
+            self?.inviteIfNeeded(peerID)
         }
     }
 
     func browser(_ browser: MCNearbyServiceBrowser, lostPeer peerID: MCPeerID) {
         DispatchQueue.main.async { [weak self] in
-            self?.discovered.remove(peerID)
             self?.updateConnectionState()
         }
     }
