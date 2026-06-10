@@ -70,6 +70,10 @@ struct RemoteControlView: View {
             .font(.title)
             .foregroundStyle(.tint)
             .padding(.bottom, 8)
+
+            Text("Developed by JaiSung NOH MD · 2026")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
         .padding()
         // 아이폰/아이패드 어디서 리모컨으로 쓰든 전체화면을 채우되,

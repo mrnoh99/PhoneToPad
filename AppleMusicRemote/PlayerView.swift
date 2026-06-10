@@ -13,6 +13,10 @@ struct PlayerView: View {
         VStack(spacing: 0) {
             statusBar
             Spacer(minLength: 0)   // 나머지 공간은 비워 둠 → 화면을 거의 차지하지 않는 얇은 바
+            Text("Developed by JaiSung NOH MD · 2026")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .padding(.bottom, 8)
         }
         // 볼륨 제어용 MPVolumeView 를 (거의 안 보이게) 뷰 계층에 얹는다.
         .background(
