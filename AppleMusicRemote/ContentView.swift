@@ -75,6 +75,10 @@ struct RolePickerView: View {
                 .multilineTextAlignment(.center)
                 .padding(.horizontal, 32)
             Spacer()
+
+            Text("Developed by JaiSung NOH MD · 2026")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
         }
         .padding()
     }

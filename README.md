@@ -92,3 +92,7 @@ AppleMusicRemote/
 ## 비고
 
 개인용 앱이라 App Store 심사 대상이 아닙니다. (`systemMusicPlayer` 원격 조종 컨셉은 심사에서 거절될 수 있음)
+
+---
+
+<sub>Developed by JaiSung NOH MD · 2026</sub>
