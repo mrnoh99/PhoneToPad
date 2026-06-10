@@ -21,6 +21,7 @@ struct RemoteControlView: View {
             let playIcon: CGFloat = compact ? 44 : 54
             let sideIcon: CGFloat = compact ? 34 : 38
 
+            ScrollView {
             VStack(spacing: compact ? 8 : 18) {
                 // 상태 줄
                 HStack {
@@ -105,7 +106,11 @@ struct RemoteControlView: View {
             .padding(.vertical, compact ? 8 : 14)
             // 큰 화면(아이패드)에서는 컨트롤이 과하게 퍼지지 않도록 가운데 적정 폭으로 모은다.
             .frame(maxWidth: 480)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // 내용이 화면보다 작으면 꽉 채워 중앙 정렬, 크면(큰 글씨 등) 스크롤되도록 minHeight 사용
+            .frame(maxWidth: .infinity, minHeight: geo.size.height)
+            }
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize)
         }
         .disabled(!net.isConnected)
         .opacity(net.isConnected ? 1 : 0.6)
