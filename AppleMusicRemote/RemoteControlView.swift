@@ -29,6 +29,14 @@ struct RemoteControlView: View {
 
             if let np = app.nowPlaying {
                 NowPlayingCard(np: np)
+                    // 앨범아트 뒤로 포인트 컬러 글로우
+                    .background(
+                        Circle()
+                            .fill(app.accent)
+                            .frame(width: 300, height: 300)
+                            .blur(radius: 70)
+                            .opacity(0.35)
+                    )
             } else {
                 VStack(spacing: 8) {
                     ProgressView()
@@ -39,12 +47,13 @@ struct RemoteControlView: View {
 
             Spacer()
 
-            // 트랜스포트 버튼
+            // 트랜스포트 버튼 (가운데 재생 버튼만 포인트 컬러)
             HStack(spacing: 44) {
                 ControlButton(system: "backward.fill") { app.sendCommand(.prev) }
                 ControlButton(system: isPlaying ? "pause.fill" : "play.fill", big: true) {
                     app.sendCommand(.playPause)
                 }
+                .foregroundStyle(app.accent)
                 ControlButton(system: "forward.fill") { app.sendCommand(.next) }
             }
 

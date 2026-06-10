@@ -9,7 +9,7 @@ struct ContentView: View {
             roleContent
         }
         .preferredColorScheme(.dark)        // 항상 다크 모드
-        .tint(.white)                       // 단색(화이트) 액센트
+        .tint(app.accent)                   // 앨범아트에서 추출한 포인트 컬러
     }
 
     @ViewBuilder private var roleContent: some View {
