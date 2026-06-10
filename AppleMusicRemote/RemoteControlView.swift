@@ -72,6 +72,10 @@ struct RemoteControlView: View {
             .padding(.bottom, 8)
         }
         .padding()
+        // 아이폰/아이패드 어디서 리모컨으로 쓰든 전체화면을 채우되,
+        // 큰 화면(아이패드)에서는 컨트롤이 과하게 퍼지지 않도록 가운데 적정 폭으로 모은다.
+        .frame(maxWidth: 480)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
         .disabled(!net.isConnected)
         .opacity(net.isConnected ? 1 : 0.6)
         // 플레이어가 보내온 볼륨으로 슬라이더 동기화(드래그 중이 아닐 때만)
