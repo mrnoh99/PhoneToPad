@@ -1,7 +1,9 @@
 import SwiftUI
+import UIKit
 
 struct ContentView: View {
     @EnvironmentObject var app: AppModel
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ZStack {
@@ -10,6 +12,10 @@ struct ContentView: View {
         }
         .preferredColorScheme(.dark)        // 항상 다크 모드
         .tint(app.accent)                   // 앨범아트에서 추출한 포인트 컬러
+        // 앱이 다시 활성화되면(백그라운드/잠금 복귀) 끊긴 연결을 재시도한다.
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { app.onBecomeActive() }
+        }
     }
 
     @ViewBuilder private var roleContent: some View {
@@ -27,6 +33,8 @@ struct ContentView: View {
 /// 첫 실행 시 이 기기의 역할을 고른다.
 struct RolePickerView: View {
     @EnvironmentObject var app: AppModel
+
+    private var isPad: Bool { UIDevice.current.userInterfaceIdiom == .pad }
 
     var body: some View {
         VStack(spacing: 28) {
@@ -64,16 +72,36 @@ struct RolePickerView: View {
             }
             .padding(.horizontal, 32)
 
+            // 아이패드 플레이어: 재생할 앱을 미리 고른다.
+            if isPad {
+                VStack(spacing: 8) {
+                    Text("재생 앱 선택")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                    MusicSourcePicker(app: app)
+                }
+                .padding(.horizontal, 32)
+            }
+
+            // 기기에 맞는 역할을 기본(상단·강조)으로 배치한다.
+            // 아이패드 → "음악 재생"이 기본, 아이폰 → "리모컨"이 기본.
             VStack(spacing: 12) {
-                RoleButton(title: "이 기기에서 음악 재생 (아이패드)",
-                           systemImage: "ipad", filled: true) { app.startPlayer() }
-                RoleButton(title: "리모컨으로 사용 (아이폰)",
-                           systemImage: "iphone", filled: false) { app.startRemote() }
+                let playerButton = RoleButton(title: "이 기기에서 음악 재생 (아이패드)",
+                                              systemImage: "ipad", filled: isPad) { app.startPlayer() }
+                let remoteButton = RoleButton(title: "리모컨으로 사용 (아이폰)",
+                                              systemImage: "iphone", filled: !isPad) { app.startRemote() }
+                if isPad {
+                    playerButton
+                    remoteButton
+                } else {
+                    remoteButton
+                    playerButton
+                }
             }
             .padding(.horizontal, 32)
 
             Spacer()
-            Text("두 기기를 같은 WiFi 에 두고, 아이패드에서 '음악 재생', 아이폰에서 '리모컨' 을 고르세요.")
+            Text("두 기기를 같은 WiFi 에 두고, 아이패드에서 Music/Classical 재생, 아이폰에서 '리모컨' 을 고르세요.")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -117,12 +145,70 @@ struct NowPlayingCard: View {
                 .font(.title3.weight(.semibold))
                 .foregroundStyle(.white)
                 .multilineTextAlignment(.center)
+                .lineLimit(2)
+                .frame(maxWidth: artSize)
+                .fixedSize(horizontal: false, vertical: true)
             if !np.artist.isEmpty {
-                Text(np.artist).foregroundStyle(.secondary)
+                Text(np.artist)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .frame(maxWidth: artSize)
             }
             if !np.album.isEmpty {
-                Text(np.album).font(.footnote).foregroundStyle(.tertiary)
+                Text(np.album)
+                    .font(.footnote)
+                    .foregroundStyle(.tertiary)
+                    .multilineTextAlignment(.center)
+                    .lineLimit(1)
+                    .frame(maxWidth: artSize)
             }
+        }
+        .frame(maxWidth: artSize)
+    }
+}
+
+/// Music / Classical 선택 세그먼트 + 앱 열기 버튼
+struct MusicSourcePicker: View {
+    @ObservedObject var app: AppModel
+
+    var body: some View {
+        VStack(spacing: 8) {
+            HStack(spacing: 0) {
+                ForEach(MusicAppSource.allCases, id: \.self) { source in
+                    Button {
+                        app.selectMusicSource(source)
+                    } label: {
+                        Text(source.label)
+                            .font(.caption.weight(.semibold))
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 10)
+                            .foregroundStyle(app.musicSource == source ? Color.black : Color.white)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(app.musicSource == source ? Color.white : Color.clear)
+                            )
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(4)
+            .background(Color.white.opacity(0.06))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1))
+
+            Button {
+                _ = app.launchSelectedMusicApp()
+            } label: {
+                Label("\(app.musicSource.label) 앱 열기", systemImage: "arrow.up.forward.app")
+                    .font(.footnote.weight(.medium))
+                    .padding(.vertical, 6)
+                    .padding(.horizontal, 10)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.tint)
         }
     }
 }

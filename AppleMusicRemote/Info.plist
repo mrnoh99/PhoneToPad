@@ -2,6 +2,18 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+	<key>CFBundleDevelopmentRegion</key>
+	<string>$(DEVELOPMENT_LANGUAGE)</string>
+	<key>CFBundleExecutable</key>
+	<string>$(EXECUTABLE_NAME)</string>
+	<key>CFBundleIdentifier</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+	<key>CFBundleInfoDictionaryVersion</key>
+	<string>6.0</string>
+	<key>CFBundleName</key>
+	<string>$(PRODUCT_NAME)</string>
+	<key>CFBundlePackageType</key>
+	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleDisplayName</key>
 	<string>PhoneToPad</string>
 	<key>CFBundleShortVersionString</key>
@@ -11,11 +23,19 @@
 
 	<!-- systemMusicPlayer / 미디어 라이브러리 접근 (플레이어=아이패드 측) -->
 	<key>NSAppleMusicUsageDescription</key>
-	<string>아이패드에서 재생 중인 음악 정보를 읽고 재생을 제어하기 위해 미디어 라이브러리 접근이 필요합니다.</string>
+	<string>아이패드에서 Apple Music·Classical 재생 정보를 읽고 재생을 제어하기 위해 미디어 라이브러리 접근이 필요합니다.</string>
 
 	<!-- MultipeerConnectivity 로컬 네트워크 -->
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>같은 WiFi의 다른 기기(아이폰/아이패드)와 연결해 음악을 원격 제어하기 위해 로컬 네트워크 접근이 필요합니다.</string>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>music</string>
+		<string>musics</string>
+		<string>classical</string>
+		<string>music-classical</string>
+	</array>
+
 	<key>NSBonjourServices</key>
 	<array>
 		<string>_ammusic-rc._tcp</string>

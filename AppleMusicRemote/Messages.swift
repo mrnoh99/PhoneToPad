@@ -10,6 +10,7 @@ enum RemoteCommand: String, Codable {
     case volumeUp
     case volumeDown
     case setVolume          // 함께 오는 `volume` 값으로 설정
+    case syncNowPlaying     // 리모컨 복귀 시 플레이어에 곡정보 재전송 요청
 }
 
 struct CommandMessage: Codable {

@@ -21,3 +21,6 @@ targets:
         CURRENT_PROJECT_VERSION: "1"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"   # 1=아이폰, 2=아이패드 (유니버설)
+        DEVELOPMENT_TEAM: 9AWEB9NYHH     # Jaisung Noh 개인 팀 (자동 서명)
+        CODE_SIGN_STYLE: Automatic
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon

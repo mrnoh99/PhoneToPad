@@ -9,6 +9,29 @@ enum DeviceRole: String {
     case remote     // 리모컨 (아이폰)
 }
 
+/// 재생·제어 대상 앱 (아이패드 플레이어 측)
+enum MusicAppSource: String, CaseIterable {
+    case music
+    case classical
+
+    var label: String {
+        switch self {
+        case .music: return "Music"
+        case .classical: return "Classical"
+        }
+    }
+
+    /// 앱 실행에 시도할 URL 후보 (앞에서부터 canOpenURL 확인)
+    var candidateURLs: [URL] {
+        switch self {
+        case .music:
+            return ["music://", "musics://"].compactMap { URL(string: $0) }
+        case .classical:
+            return ["classical://", "music-classical://"].compactMap { URL(string: $0) }
+        }
+    }
+}
+
 /// 앱 전역 상태 + 네트워크/음악/볼륨 컨트롤러를 연결한다.
 final class AppModel: ObservableObject {
 
@@ -23,6 +46,8 @@ final class AppModel: ObservableObject {
     @Published var nowPlaying: NowPlayingMessage?
     /// 현재 앨범아트에서 추출한 포인트 컬러(곡이 바뀌면 액센트가 바뀜). 아트 없으면 흰색.
     @Published var accent: Color = .white
+    /// 제어할 음악 앱 (Music / Classical)
+    @Published var musicSource: MusicAppSource = .music
 
     let multipeer = MultipeerService()
     let music = MusicController()
@@ -34,13 +59,84 @@ final class AppModel: ObservableObject {
         let saved = UserDefaults.standard.string(forKey: "role") ?? DeviceRole.unset.rawValue
         role = DeviceRole(rawValue: saved) ?? .unset
         pairingCode = UserDefaults.standard.string(forKey: "pairingCode") ?? ""
+        let savedSource = UserDefaults.standard.string(forKey: "musicSource") ?? MusicAppSource.music.rawValue
+        musicSource = MusicAppSource(rawValue: savedSource) ?? .music
+        music.preferredSource = musicSource
         wire()
+        resumeNetworkingIfNeeded()
+    }
+
+    /// 앱 재실행 시 저장된 역할이 있으면 Multipeer 탐색을 다시 켠다.
+    func resumeNetworkingIfNeeded() {
+        switch role {
+        case .player:
+            guard !multipeer.isActive else { return }
+            multipeer.start(role: .player, code: pairingCode)
+            music.requestAuthAndStart()
+        case .remote:
+            guard !multipeer.isActive else { return }
+            multipeer.start(role: .remote, code: pairingCode)
+        case .unset:
+            break
+        }
+    }
+
+    /// Music / Classical 선택만 변경 (앱은 열지 않음)
+    func selectMusicSource(_ source: MusicAppSource) {
+        musicSource = source
+        UserDefaults.standard.set(source.rawValue, forKey: "musicSource")
+        music.preferredSource = source
+        clearNowPlayingDisplay()
+        music.invalidateAndRefresh()
+    }
+
+    /// 선택한 음악 앱을 연다 (별도 버튼용)
+    @discardableResult
+    func launchSelectedMusicApp() -> Bool {
+        for url in musicSource.candidateURLs {
+            guard UIApplication.shared.canOpenURL(url) else { continue }
+            UIApplication.shared.open(url)
+            return true
+        }
+        return false
+    }
+
+    /// 앱 전환·복귀 시 곡 정보를 다시 읽는다.
+    func refreshNowPlayingFromSystem() {
+        music.invalidateAndRefresh()
+    }
+
+    /// 화면 켜짐·포그라운드 복귀 시 연결·곡정보를 복구한다.
+    func onBecomeActive() {
+        resumeNetworkingIfNeeded()
+        multipeer.wakeUp()
+        switch role {
+        case .player:
+            if multipeer.isConnected {
+                music.invalidateAndRefresh()
+            }
+        case .remote:
+            // wakeUp 이 비동기라 연결 확인을 잠시 뒤에 한다
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { [weak self] in
+                guard let self, self.multipeer.isConnected else { return }
+                self.sendCommand(.syncNowPlaying)
+            }
+        case .unset:
+            break
+        }
+    }
+
+    /// 이전 앱의 앨범아트/제목이 남지 않도록 표시 상태를 초기화한다.
+    private func clearNowPlayingDisplay() {
+        nowPlaying = nil
+        lastArtwork = nil
+        accent = .white
     }
 
     private func wire() {
         // 리모컨 명령 수신 → 플레이어가 실행
         multipeer.onCommand = { [weak self] cmd in
-            DispatchQueue.main.async { self?.handle(cmd) }
+            self?.handle(cmd)
         }
         // 플레이어 곡정보 수신 → 리모컨 표시 + 포인트 컬러 갱신
         multipeer.onNowPlaying = { [weak self] np in
@@ -51,8 +147,12 @@ final class AppModel: ObservableObject {
         }
         // 플레이어 곡정보 변동 → 리모컨에 전송 + (이 기기에서도) 포인트 컬러 갱신
         music.onNowPlayingChanged = { [weak self] np in
-            self?.multipeer.send(Packet(command: nil, nowPlaying: np))
-            DispatchQueue.main.async { self?.updateAccent(from: np.artworkJPEG) }
+            guard let self else { return }
+            self.multipeer.send(Packet(command: nil, nowPlaying: np))
+            DispatchQueue.main.async {
+                self.nowPlaying = np
+                self.updateAccent(from: np.artworkJPEG)
+            }
         }
         // 볼륨이 실제 반영된 뒤에야 정확한 값을 다시 전송
         volume.onVolumeApplied = { [weak self] in
@@ -63,7 +163,11 @@ final class AppModel: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] connected in
                 guard let self, connected, self.role == .player else { return }
-                self.music.publish()
+                // 세션 핸드셰이크 직후 대용량 전송이 연결을 깨뜨리지 않도록 잠시 대기
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                    guard let self, self.multipeer.isConnected else { return }
+                    self.music.invalidateAndRefresh()
+                }
             }
             .store(in: &cancellables)
     }
@@ -110,6 +214,8 @@ final class AppModel: ObservableObject {
         case .volumeDown: volume.changeVolume(by: -0.0625)
         case .setVolume:
             if let v = cmd.volume { volume.setVolume(v) }
+        case .syncNowPlaying:
+            music.invalidateAndRefresh()
         }
     }
 

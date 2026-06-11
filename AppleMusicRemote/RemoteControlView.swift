@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 리모컨 모드(아이폰). 곡 정보를 표시하고, 버튼/슬라이더로 명령을 전송한다.
 /// 화면 높이에 맞춰 요소 크기를 조절해 iPhone 12 mini 같은 작은 화면에서도 스크롤 없이 들어가게 한다.
@@ -6,10 +7,22 @@ struct RemoteControlView: View {
     @ObservedObject var app: AppModel
     @ObservedObject var net: MultipeerService
 
+    @Environment(\.openURL) private var openURL
     @State private var volume: Float = 0.5
     @State private var draggingVolume = false
+    /// 탭 직후 재생/일시정지 아이콘을 바로 바꾸기 위한 낙관적 상태
+    @State private var playOverride: Bool?
 
-    private var isPlaying: Bool { app.nowPlaying?.isPlaying ?? false }
+    private var isPlaying: Bool { playOverride ?? app.nowPlaying?.isPlaying ?? false }
+
+    private var statusColor: Color {
+        if net.isConnected { return .green }
+        if net.statusDetail.contains("연결 중") || net.statusDetail.contains("발견")
+            || net.statusDetail.contains("검색") || net.statusDetail.contains("다시") {
+            return .orange
+        }
+        return .red
+    }
 
     var body: some View {
         GeometryReader { geo in
@@ -24,21 +37,47 @@ struct RemoteControlView: View {
             ScrollView {
             VStack(spacing: compact ? 8 : 18) {
                 // 상태 줄
-                HStack {
-                    Circle()
-                        .fill(net.isConnected ? Color.green : Color.red)
-                        .frame(width: 10, height: 10)
-                    Text(net.isConnected ? "연결됨" : "연결 대기 중…")
-                        .font(.footnote)
-                        .foregroundStyle(.secondary)
-                    Spacer()
-                    Button("역할 변경") { app.resetRole() }
-                        .font(.footnote)
+                VStack(spacing: 4) {
+                    HStack {
+                        Circle()
+                            .fill(statusColor)
+                            .frame(width: 10, height: 10)
+                        Text(net.isConnected ? "연결됨" : "연결 대기 중…")
+                            .font(.footnote)
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        if !net.isConnected {
+                            Button {
+                                net.rescan()
+                            } label: {
+                                Image(systemName: "arrow.clockwise")
+                            }
+                            .font(.footnote)
+                        }
+                        Button("역할 변경") { app.resetRole() }
+                            .font(.footnote)
+                    }
+                    // 진단: 지금 어느 단계에서 막혀 있는지 보여준다.
+                    if !net.isConnected {
+                        HStack(spacing: 6) {
+                            Text(net.statusDetail)
+                                .font(.caption2)
+                                .foregroundStyle(net.startFailed ? .red : .secondary)
+                                .multilineTextAlignment(.leading)
+                            if net.startFailed,
+                               let url = URL(string: UIApplication.openSettingsURLString) {
+                                Button("설정 열기") { openURL(url) }
+                                    .font(.caption2)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                    }
                 }
 
                 Spacer(minLength: 4)
 
-                if let np = app.nowPlaying {
+                if let np = app.nowPlaying,
+                   !np.title.isEmpty, np.title != "재생 중인 곡 없음" {
                     NowPlayingCard(np: np, artSize: artSize)
                         // 앨범아트 뒤로 포인트 컬러 글로우
                         .background(
@@ -51,7 +90,7 @@ struct RemoteControlView: View {
                 } else {
                     VStack(spacing: 8) {
                         ProgressView()
-                        Text(net.isConnected ? "곡 정보를 받는 중…" : "아이패드(플레이어) 연결을 기다리는 중")
+                        Text(net.isConnected ? "곡 정보를 받는 중…" : "아이패드(Music/Classical) 연결을 기다리는 중")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
                             .multilineTextAlignment(.center)
@@ -61,42 +100,48 @@ struct RemoteControlView: View {
 
                 Spacer(minLength: 4)
 
-                // 트랜스포트 버튼 (가운데 재생 버튼만 포인트 컬러)
-                HStack(spacing: compact ? 36 : 44) {
-                    ControlButton(system: "backward.fill", diameter: sideD, iconSize: sideIcon) {
-                        app.sendCommand(.prev)
+                // 재생/볼륨 컨트롤만 연결 전에는 비활성화(상태줄·역할 변경 버튼은 항상 사용 가능)
+                Group {
+                    // 트랜스포트 버튼 (가운데 재생 버튼만 포인트 컬러)
+                    HStack(spacing: compact ? 36 : 44) {
+                        ControlButton(system: "backward.fill", diameter: sideD, iconSize: sideIcon) {
+                            app.sendCommand(.prev)
+                        }
+                        ControlButton(system: isPlaying ? "pause.fill" : "play.fill",
+                                      diameter: playD, iconSize: playIcon) {
+                            playOverride = !isPlaying
+                            app.sendCommand(.playPause)
+                        }
+                        .foregroundStyle(.white)
+                        ControlButton(system: "forward.fill", diameter: sideD, iconSize: sideIcon) {
+                            app.sendCommand(.next)
+                        }
                     }
-                    ControlButton(system: isPlaying ? "pause.fill" : "play.fill",
-                                  diameter: playD, iconSize: playIcon) {
-                        app.sendCommand(.playPause)
-                    }
-                    .foregroundStyle(app.accent)
-                    ControlButton(system: "forward.fill", diameter: sideD, iconSize: sideIcon) {
-                        app.sendCommand(.next)
-                    }
-                }
 
-                // 볼륨 슬라이더
-                HStack(spacing: 12) {
-                    Image(systemName: "speaker.fill").foregroundStyle(.secondary)
-                    Slider(value: $volume, in: 0...1) { editing in
-                        draggingVolume = editing
-                        if !editing { app.sendVolume(volume) }
+                    // 볼륨 슬라이더
+                    HStack(spacing: 12) {
+                        Image(systemName: "speaker.fill").foregroundStyle(.secondary)
+                        Slider(value: $volume, in: 0...1) { editing in
+                            draggingVolume = editing
+                            if !editing { app.sendVolume(volume) }
+                        }
+                        Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
                     }
-                    Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
-                }
 
-                // 볼륨 미세 조정 버튼
-                HStack(spacing: 36) {
-                    Button { app.sendCommand(.volumeDown) } label: {
-                        Image(systemName: "minus.circle.fill")
+                    // 볼륨 미세 조정 버튼
+                    HStack(spacing: 36) {
+                        Button { app.sendCommand(.volumeDown) } label: {
+                            Image(systemName: "minus.circle.fill")
+                        }
+                        Button { app.sendCommand(.volumeUp) } label: {
+                            Image(systemName: "plus.circle.fill")
+                        }
                     }
-                    Button { app.sendCommand(.volumeUp) } label: {
-                        Image(systemName: "plus.circle.fill")
-                    }
+                    .font(compact ? .title2 : .title)
+                    .foregroundStyle(.tint)
                 }
-                .font(compact ? .title2 : .title)
-                .foregroundStyle(.tint)
+                .disabled(!net.isConnected)
+                .opacity(net.isConnected ? 1 : 0.4)
 
                 Text("Developed by JaiSung NOH MD · 2026")
                     .font(.caption2)
@@ -112,11 +157,13 @@ struct RemoteControlView: View {
             .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize)
         }
-        .disabled(!net.isConnected)
-        .opacity(net.isConnected ? 1 : 0.6)
         // 플레이어가 보내온 볼륨으로 슬라이더 동기화(드래그 중이 아닐 때만)
         .onChange(of: app.nowPlaying?.volume) { _, newValue in
             if let v = newValue, !draggingVolume { volume = v }
+        }
+        // 아이패드에서 실제 재생 상태가 오면 낙관적 아이콘을 실제 값으로 맞춘다.
+        .onChange(of: app.nowPlaying?.isPlaying) { _, _ in
+            playOverride = nil
         }
     }
 }
