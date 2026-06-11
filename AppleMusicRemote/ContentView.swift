@@ -120,10 +120,12 @@ struct RolePickerView: View {
 struct NowPlayingCard: View {
     let np: NowPlayingMessage
     var artSize: CGFloat = 260
+    // 앨범아트는 매 렌더마다 디코드하지 않고, 아트 데이터가 바뀔 때만 한 번 디코드해 캐시한다.
+    @State private var decodedArt: UIImage?
 
     var body: some View {
         VStack(spacing: 12) {
-            if let data = np.artworkJPEG, let ui = UIImage(data: data) {
+            if let ui = decodedArt {
                 Image(uiImage: ui)
                     .resizable()
                     .scaledToFit()
@@ -165,6 +167,14 @@ struct NowPlayingCard: View {
             }
         }
         .frame(maxWidth: artSize)
+        // 아트 데이터가 바뀔 때만 백그라운드에서 1회 디코드 (렌더 경로에서 디코드 제거)
+        .task(id: np.artworkJPEG) {
+            let data = np.artworkJPEG
+            let image = await Task.detached(priority: .userInitiated) {
+                data.flatMap { UIImage(data: $0) }
+            }.value
+            decodedArt = image
+        }
     }
 }
 
