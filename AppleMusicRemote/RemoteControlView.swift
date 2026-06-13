@@ -102,7 +102,7 @@ struct RemoteControlView: View {
 
                 // 재생/볼륨 컨트롤만 연결 전에는 비활성화(상태줄·역할 변경 버튼은 항상 사용 가능)
                 Group {
-                    // 트랜스포트 버튼 (가운데 재생 버튼만 포인트 컬러)
+                    // 트랜스포트 버튼 — 이전·재생·다음 모두 포인트 컬러(앨범아트 색)로 통일
                     HStack(spacing: compact ? 36 : 44) {
                         ControlButton(system: "backward.fill", diameter: sideD, iconSize: sideIcon) {
                             app.sendCommand(.prev)
@@ -112,16 +112,16 @@ struct RemoteControlView: View {
                             playOverride = !isPlaying
                             app.sendCommand(.playPause)
                         }
-                        .foregroundStyle(.white)
                         ControlButton(system: "forward.fill", diameter: sideD, iconSize: sideIcon) {
                             app.sendCommand(.next)
                         }
                     }
+                    .foregroundStyle(app.accent)
 
-                    // 볼륨 슬라이더
+                    // 볼륨 슬라이더 — 손잡이는 정원(Circle), 색은 버튼과 동일한 포인트 컬러
                     HStack(spacing: 12) {
                         Image(systemName: "speaker.fill").foregroundStyle(.secondary)
-                        Slider(value: $volume, in: 0...1) { editing in
+                        AccentSlider(value: $volume, accent: app.accent) { editing in
                             draggingVolume = editing
                             if !editing { app.sendVolume(volume) }
                         }
@@ -153,6 +153,49 @@ struct RemoteControlView: View {
         .onChange(of: app.nowPlaying?.isPlaying) { _, _ in
             playOverride = nil
         }
+    }
+}
+
+/// 볼륨 슬라이더 — 손잡이가 정확한 원(Circle)이고, 채움·손잡이 색을 지정(accent)할 수 있다.
+struct AccentSlider: View {
+    @Binding var value: Float           // 0...1
+    var accent: Color = .white
+    var onEditingChanged: (Bool) -> Void
+
+    private let knob: CGFloat = 22
+    private let trackHeight: CGFloat = 4
+
+    var body: some View {
+        GeometryReader { geo in
+            let usable = max(geo.size.width - knob, 1)
+            let clamped = CGFloat(min(max(value, 0), 1))
+            let x = clamped * usable
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.18))
+                    .frame(height: trackHeight)
+                Capsule()
+                    .fill(accent)
+                    .frame(width: x + knob / 2, height: trackHeight)
+                Circle()
+                    .fill(accent)
+                    .frame(width: knob, height: knob)
+                    .shadow(color: .black.opacity(0.3), radius: 1, y: 0.5)
+                    .offset(x: x)
+            }
+            .frame(height: knob)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { g in
+                        onEditingChanged(true)
+                        let nx = min(max(g.location.x - knob / 2, 0), usable)
+                        value = Float(nx / usable)
+                    }
+                    .onEnded { _ in onEditingChanged(false) }
+            )
+        }
+        .frame(height: knob)
     }
 }
 
