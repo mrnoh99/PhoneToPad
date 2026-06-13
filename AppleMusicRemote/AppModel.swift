@@ -74,6 +74,7 @@ final class AppModel: ObservableObject {
     func resumeNetworkingIfNeeded() {
         switch role {
         case .player:
+            startPositionUpdates()
             guard !multipeer.isActive else { return }
             multipeer.start(role: .player, code: pairingCode)
             music.requestAuthAndStart()
@@ -182,10 +183,9 @@ final class AppModel: ObservableObject {
                         guard let self, self.multipeer.isConnected else { return }
                         self.music.invalidateAndRefresh()
                     }
-                    self.startPositionUpdates()
-                } else {
-                    self.stopPositionUpdates()
                 }
+                // 진행바는 연결 여부와 무관하게 플레이어가 항상 갱신(끊겨도 로컬 표시 유지)
+                self.startPositionUpdates()
             }
             .store(in: &cancellables)
     }
@@ -195,6 +195,7 @@ final class AppModel: ObservableObject {
         role = .player
         multipeer.start(role: .player, code: pairingCode)
         music.requestAuthAndStart()
+        startPositionUpdates()
     }
 
     func startRemote() {
@@ -220,9 +221,27 @@ final class AppModel: ObservableObject {
         multipeer.send(Packet(command: CommandMessage(command: .setVolume, volume: v)))
     }
 
-    /// 진행바 드래그 → 구간 이동 요청
+    /// 진행바 드래그 → 구간 이동. 플레이어는 로컬에서 직접 이동, 리모컨은 명령 전송.
     func sendSeek(to time: Double) {
-        multipeer.send(Packet(command: CommandMessage(command: .seek, seekTime: time)))
+        if role == .player {
+            MPMusicPlayerController.systemMusicPlayer.currentPlaybackTime = time
+            sendPosition()
+        } else {
+            multipeer.send(Packet(command: CommandMessage(command: .seek, seekTime: time)))
+        }
+    }
+
+    // MARK: - 플레이어 로컬 셔플/반복 토글 (PlayerView 용)
+    func togglePlayerShuffle() {
+        let sp = MPMusicPlayerController.systemMusicPlayer
+        sp.shuffleMode = (sp.shuffleMode == .off) ? .songs : .off
+        sendEnrichedNowPlaying()
+    }
+
+    func togglePlayerRepeat() {
+        let sp = MPMusicPlayerController.systemMusicPlayer
+        sp.repeatMode = Self.nextRepeat(sp.repeatMode)
+        sendEnrichedNowPlaying()
     }
 
     /// 리모컨에서 보간한 현재 경과 시간(초) — 재생 중이면 받은 시점부터 흐른 시간을 더함
@@ -280,7 +299,7 @@ final class AppModel: ObservableObject {
     }
 
     private func sendPosition() {
-        guard role == .player, multipeer.isConnected else { return }
+        guard role == .player else { return }
         let sp = MPMusicPlayerController.systemMusicPlayer
         guard let item = sp.nowPlayingItem else { return }
         let dur = item.playbackDuration
@@ -288,7 +307,13 @@ final class AppModel: ObservableObject {
         let pos = PlaybackPosition(elapsed: sp.currentPlaybackTime,
                                    duration: dur,
                                    isPlaying: sp.playbackState == .playing)
-        multipeer.send(Packet(position: pos))
+        // 플레이어 자신의 진행바도 갱신(연결 여부와 무관하게 표시)
+        playback = pos
+        playbackReceivedAt = Date()
+        // 리모컨이 연결돼 있으면 함께 전송
+        if multipeer.isConnected {
+            multipeer.send(Packet(position: pos))
+        }
     }
 
     // MARK: - 곡정보 메타데이터/모드 보강 (플레이어 측)
