@@ -29,10 +29,11 @@ struct RemoteControlView: View {
             // 작은 화면(예: 12 mini, 가용 높이 ~730) 감지 후 크기 축소
             let compact = geo.size.height < 740
             let artSize = max(150, min(geo.size.width - 64, geo.size.height * (compact ? 0.32 : 0.40)))
-            let playD: CGFloat = compact ? 72 : 88
-            let sideD: CGFloat = compact ? 58 : 64
-            let playIcon: CGFloat = compact ? 44 : 54
-            let sideIcon: CGFloat = compact ? 34 : 38
+            // Apple Music Now Playing 화면과 유사한 컨트롤 크기
+            let playD: CGFloat = compact ? 64 : 72
+            let sideD: CGFloat = compact ? 52 : 58
+            let playIcon: CGFloat = compact ? 42 : 48
+            let sideIcon: CGFloat = compact ? 28 : 32
 
             ScrollView {
             VStack(spacing: compact ? 8 : 18) {
@@ -156,46 +157,44 @@ struct RemoteControlView: View {
     }
 }
 
-/// 볼륨 슬라이더 — 손잡이가 정확한 원(Circle)이고, 채움·손잡이 색을 지정(accent)할 수 있다.
+/// 볼륨 슬라이더 — Apple Music 스타일: 손잡이 없는 얇은 막대(터치 시 살짝 두꺼워짐).
 struct AccentSlider: View {
     @Binding var value: Float           // 0...1
     var accent: Color = .white
     var onEditingChanged: (Bool) -> Void
 
-    private let knob: CGFloat = 22
-    private let trackHeight: CGFloat = 4
+    @State private var dragging = false
 
     var body: some View {
         GeometryReader { geo in
-            let usable = max(geo.size.width - knob, 1)
+            let w = geo.size.width
+            let h: CGFloat = dragging ? 11 : 7          // 터치하면 살짝 두꺼워짐
             let clamped = CGFloat(min(max(value, 0), 1))
-            let x = clamped * usable
             ZStack(alignment: .leading) {
                 Capsule()
-                    .fill(Color.white.opacity(0.18))
-                    .frame(height: trackHeight)
+                    .fill(Color.white.opacity(0.22))
+                    .frame(height: h)
                 Capsule()
                     .fill(accent)
-                    .frame(width: x + knob / 2, height: trackHeight)
-                Circle()
-                    .fill(accent)
-                    .frame(width: knob, height: knob)
-                    .shadow(color: .black.opacity(0.3), radius: 1, y: 0.5)
-                    .offset(x: x)
+                    .frame(width: max(h, clamped * w), height: h)
             }
-            .frame(height: knob)
+            .frame(width: w, height: 24, alignment: .center)   // 넉넉한 터치 영역
             .contentShape(Rectangle())
+            .animation(.easeOut(duration: 0.15), value: dragging)
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { g in
+                        dragging = true
                         onEditingChanged(true)
-                        let nx = min(max(g.location.x - knob / 2, 0), usable)
-                        value = Float(nx / usable)
+                        value = Float(min(max(g.location.x / w, 0), 1))
                     }
-                    .onEnded { _ in onEditingChanged(false) }
+                    .onEnded { _ in
+                        dragging = false
+                        onEditingChanged(false)
+                    }
             )
         }
-        .frame(height: knob)
+        .frame(height: 24)
     }
 }
 
