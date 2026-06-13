@@ -24,6 +24,7 @@ final class MultipeerService: NSObject, ObservableObject {
 
     var onCommand: ((CommandMessage) -> Void)?
     var onNowPlaying: ((NowPlayingMessage) -> Void)?
+    var onPosition: ((PlaybackPosition) -> Void)?
 
     private let serviceType = "ammusic-rc"
     private let myPeerID = MCPeerID(
@@ -313,6 +314,7 @@ extension MultipeerService: MCSessionDelegate {
         runOnMain {
             if let cmd = packet.command { self.onCommand?(cmd) }
             if let np = packet.nowPlaying { self.onNowPlaying?(np) }
+            if let pos = packet.position { self.onPosition?(pos) }
         }
     }
 

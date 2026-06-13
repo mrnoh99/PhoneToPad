@@ -14,6 +14,8 @@ struct RemoteControlView: View {
     @State private var playOverride: Bool?
 
     private var isPlaying: Bool { playOverride ?? app.nowPlaying?.isPlaying ?? false }
+    private var shuffleOn: Bool { (app.nowPlaying?.shuffleMode ?? 0) == 1 }
+    private var repeatMode: Int { app.nowPlaying?.repeatMode ?? 0 }
 
     private var statusColor: Color {
         if net.isConnected { return .green }
@@ -79,15 +81,24 @@ struct RemoteControlView: View {
 
                 if let np = app.nowPlaying,
                    !np.title.isEmpty, np.title != "재생 중인 곡 없음" {
-                    NowPlayingCard(np: np, artSize: artSize)
-                        // 앨범아트 뒤로 포인트 컬러 글로우
-                        .background(
-                            Circle()
-                                .fill(app.accent)
-                                .frame(width: artSize * 1.15, height: artSize * 1.15)
-                                .blur(radius: 70)
-                                .opacity(0.35)
-                        )
+                    VStack(spacing: compact ? 8 : 12) {
+                        NowPlayingCard(np: np, artSize: artSize)
+                            // 앨범아트 뒤로 포인트 컬러 글로우
+                            .background(
+                                Circle()
+                                    .fill(app.accent)
+                                    .frame(width: artSize * 1.15, height: artSize * 1.15)
+                                    .blur(radius: 70)
+                                    .opacity(0.35)
+                            )
+                        // 사이공간: 작곡가 / 앨범 아티스트 / 발매일
+                        TrackMetaView(np: np, maxWidth: artSize)
+                        // 진행바 + 경과/남은 시간 (위치 정보가 도착한 뒤에만 표시)
+                        if app.playback != nil {
+                            ProgressBar(app: app, accent: app.accent)
+                                .frame(maxWidth: artSize)
+                        }
+                    }
                 } else {
                     VStack(spacing: 8) {
                         ProgressView()
@@ -103,21 +114,41 @@ struct RemoteControlView: View {
 
                 // 재생/볼륨 컨트롤만 연결 전에는 비활성화(상태줄·역할 변경 버튼은 항상 사용 가능)
                 Group {
-                    // 트랜스포트 버튼 — 이전·재생·다음 모두 포인트 컬러(앨범아트 색)로 통일
-                    HStack(spacing: compact ? 36 : 44) {
-                        ControlButton(system: "backward.fill", diameter: sideD, iconSize: sideIcon) {
-                            app.sendCommand(.prev)
+                    // 셔플 | 이전·재생·다음 | 반복  (양 끝에 토글, 가운데 트랜스포트)
+                    HStack {
+                        Button { app.sendCommand(.toggleShuffle) } label: {
+                            Image(systemName: "shuffle")
+                                .font(.system(size: compact ? 16 : 18, weight: .semibold))
+                                .foregroundStyle(shuffleOn ? app.accent : .secondary)
                         }
-                        ControlButton(system: isPlaying ? "pause.fill" : "play.fill",
-                                      diameter: playD, iconSize: playIcon) {
-                            playOverride = !isPlaying
-                            app.sendCommand(.playPause)
+                        .buttonStyle(.plain)
+
+                        Spacer(minLength: 0)
+
+                        HStack(spacing: compact ? 28 : 36) {
+                            ControlButton(system: "backward.fill", diameter: sideD, iconSize: sideIcon) {
+                                app.sendCommand(.prev)
+                            }
+                            ControlButton(system: isPlaying ? "pause.fill" : "play.fill",
+                                          diameter: playD, iconSize: playIcon) {
+                                playOverride = !isPlaying
+                                app.sendCommand(.playPause)
+                            }
+                            ControlButton(system: "forward.fill", diameter: sideD, iconSize: sideIcon) {
+                                app.sendCommand(.next)
+                            }
                         }
-                        ControlButton(system: "forward.fill", diameter: sideD, iconSize: sideIcon) {
-                            app.sendCommand(.next)
+                        .foregroundStyle(app.accent)
+
+                        Spacer(minLength: 0)
+
+                        Button { app.sendCommand(.toggleRepeat) } label: {
+                            Image(systemName: repeatMode == 1 ? "repeat.1" : "repeat")
+                                .font(.system(size: compact ? 16 : 18, weight: .semibold))
+                                .foregroundStyle(repeatMode == 0 ? .secondary : app.accent)
                         }
+                        .buttonStyle(.plain)
                     }
-                    .foregroundStyle(app.accent)
 
                     // 볼륨 슬라이더 — 손잡이는 정원(Circle), 색은 버튼과 동일한 포인트 컬러
                     HStack(spacing: 12) {
@@ -212,5 +243,87 @@ struct ControlButton: View {
                 .frame(width: diameter, height: diameter)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// 앨범 카드와 재생 버튼 사이: 작곡가 / 앨범 아티스트 / 발매일 (있는 항목만)
+struct TrackMetaView: View {
+    let np: NowPlayingMessage
+    var maxWidth: CGFloat = 300
+
+    var body: some View {
+        VStack(spacing: 2) {
+            if let c = np.composer, !c.isEmpty { row("작곡", c) }
+            if let aa = np.albumArtist, !aa.isEmpty, aa != np.artist { row("앨범 아티스트", aa) }
+            if let rd = np.releaseDate, !rd.isEmpty { row("발매", rd) }
+        }
+        .frame(maxWidth: maxWidth)
+    }
+
+    private func row(_ label: String, _ value: String) -> some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .frame(width: 76, alignment: .leading)
+            Text(value)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+/// 진행바 + 경과/남은 시간. 위치는 1초마다 받고, 그 사이는 로컬에서 보간한다. 드래그로 seek.
+struct ProgressBar: View {
+    @ObservedObject var app: AppModel
+    var accent: Color = .white
+    @State private var dragFraction: Double?
+
+    var body: some View {
+        let dur = app.playback?.duration ?? 0
+        TimelineView(.periodic(from: .now, by: 0.5)) { _ in
+            let elapsed = dragFraction.map { $0 * dur } ?? app.currentElapsed()
+            let frac = dur > 0 ? min(max(elapsed / dur, 0), 1) : 0
+            VStack(spacing: 3) {
+                GeometryReader { geo in
+                    let w = geo.size.width
+                    ZStack(alignment: .leading) {
+                        Capsule().fill(Color.white.opacity(0.22)).frame(height: 6)
+                        Capsule().fill(accent).frame(width: max(6, CGFloat(frac) * w), height: 6)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 22, alignment: .leading)
+                    .contentShape(Rectangle())
+                    .gesture(
+                        DragGesture(minimumDistance: 0)
+                            .onChanged { g in
+                                guard dur > 0 else { return }
+                                dragFraction = Double(min(max(g.location.x / w, 0), 1))
+                            }
+                            .onEnded { _ in
+                                if let f = dragFraction, dur > 0 { app.sendSeek(to: f * dur) }
+                                dragFraction = nil
+                            }
+                    )
+                }
+                .frame(height: 22)
+                HStack {
+                    Text(timeString(elapsed))
+                    Spacer()
+                    Text("-" + timeString(max(0, dur - elapsed)))
+                }
+                .font(.caption2.monospacedDigit())
+                .foregroundStyle(.secondary)
+            }
+        }
+        .frame(height: 40)
+        .opacity(dur > 0 ? 1 : 0)   // 길이 정보 없으면 숨김
+    }
+
+    private func timeString(_ t: Double) -> String {
+        guard t.isFinite, t >= 0 else { return "0:00" }
+        let total = Int(t.rounded())
+        return String(format: "%d:%02d", total / 60, total % 60)
     }
 }

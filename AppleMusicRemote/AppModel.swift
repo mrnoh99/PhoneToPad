@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import UIKit
 import CoreImage
+import MediaPlayer
 
 enum DeviceRole: String {
     case unset      // 아직 역할 미선택
@@ -48,6 +49,9 @@ final class AppModel: ObservableObject {
     @Published var accent: Color = .white
     /// 제어할 음악 앱 (Music / Classical)
     @Published var musicSource: MusicAppSource = .music
+    /// 리모컨 측 진행 위치(플레이어가 1초마다 보내옴) + 받은 시각(로컬 보간용)
+    @Published var playback: PlaybackPosition?
+    private var playbackReceivedAt = Date()
 
     let multipeer = MultipeerService()
     let music = MusicController()
@@ -131,6 +135,7 @@ final class AppModel: ObservableObject {
         nowPlaying = nil
         lastArtwork = nil
         accent = .white
+        playback = nil
     }
 
     private func wire() {
@@ -145,28 +150,41 @@ final class AppModel: ObservableObject {
                 self?.updateAccent(from: np.artworkJPEG)
             }
         }
-        // 플레이어 곡정보 변동 → 리모컨에 전송 + (이 기기에서도) 포인트 컬러 갱신
+        // 리모컨: 진행 위치 수신 → 보간용 기준값 저장
+        multipeer.onPosition = { [weak self] pos in
+            DispatchQueue.main.async {
+                self?.playback = pos
+                self?.playbackReceivedAt = Date()
+            }
+        }
+        // 플레이어 곡정보 변동 → 메타데이터/모드 보강 후 전송 + 포인트 컬러 갱신
         music.onNowPlayingChanged = { [weak self] np in
             guard let self else { return }
-            self.multipeer.send(Packet(command: nil, nowPlaying: np))
+            let enriched = self.enrichNowPlaying(np)
+            self.multipeer.send(Packet(nowPlaying: enriched))
             DispatchQueue.main.async {
-                self.nowPlaying = np
-                self.updateAccent(from: np.artworkJPEG)
+                self.nowPlaying = enriched
+                self.updateAccent(from: enriched.artworkJPEG)
             }
         }
         // 볼륨이 실제 반영된 뒤에야 정확한 값을 다시 전송
         volume.onVolumeApplied = { [weak self] in
             self?.music.publishSoon()
         }
-        // 연결되면 현재 상태를 즉시 한 번 보냄(플레이어 측)
+        // 연결 상태 변화(플레이어 측): 연결되면 곡정보 갱신 + 진행위치 송신 시작
         multipeer.$isConnected
             .removeDuplicates()
             .sink { [weak self] connected in
-                guard let self, connected, self.role == .player else { return }
-                // 세션 핸드셰이크 직후 대용량 전송이 연결을 깨뜨리지 않도록 잠시 대기
-                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
-                    guard let self, self.multipeer.isConnected else { return }
-                    self.music.invalidateAndRefresh()
+                guard let self, self.role == .player else { return }
+                if connected {
+                    // 세션 핸드셰이크 직후 대용량 전송이 연결을 깨뜨리지 않도록 잠시 대기
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                        guard let self, self.multipeer.isConnected else { return }
+                        self.music.invalidateAndRefresh()
+                    }
+                    self.startPositionUpdates()
+                } else {
+                    self.stopPositionUpdates()
                 }
             }
             .store(in: &cancellables)
@@ -186,7 +204,9 @@ final class AppModel: ObservableObject {
 
     func resetRole() {
         multipeer.stop()
+        stopPositionUpdates()
         nowPlaying = nil
+        playback = nil
         role = .unset
     }
 
@@ -197,12 +217,24 @@ final class AppModel: ObservableObject {
     }
 
     func sendVolume(_ v: Float) {
-        multipeer.send(Packet(command: CommandMessage(command: .setVolume, volume: v),
-                              nowPlaying: nil))
+        multipeer.send(Packet(command: CommandMessage(command: .setVolume, volume: v)))
+    }
+
+    /// 진행바 드래그 → 구간 이동 요청
+    func sendSeek(to time: Double) {
+        multipeer.send(Packet(command: CommandMessage(command: .seek, seekTime: time)))
+    }
+
+    /// 리모컨에서 보간한 현재 경과 시간(초) — 재생 중이면 받은 시점부터 흐른 시간을 더함
+    func currentElapsed() -> Double {
+        guard let p = playback else { return 0 }
+        let extra = p.isPlaying ? Date().timeIntervalSince(playbackReceivedAt) : 0
+        return min(p.duration, max(0, p.elapsed + extra))
     }
 
     // MARK: - 플레이어 측 명령 실행
     private func handle(_ cmd: CommandMessage) {
+        let sp = MPMusicPlayerController.systemMusicPlayer
         switch cmd.command {
         case .play:       music.play()
         case .pause:      music.pause()
@@ -216,6 +248,91 @@ final class AppModel: ObservableObject {
             if let v = cmd.volume { volume.setVolume(v) }
         case .syncNowPlaying:
             music.invalidateAndRefresh()
+        case .toggleRepeat:
+            sp.repeatMode = Self.nextRepeat(sp.repeatMode)
+            sendEnrichedNowPlaying()
+        case .toggleShuffle:
+            sp.shuffleMode = (sp.shuffleMode == .off) ? .songs : .off
+            sendEnrichedNowPlaying()
+        case .seek:
+            if let t = cmd.seekTime {
+                sp.currentPlaybackTime = t
+                sendPosition()
+            }
+        }
+    }
+
+    // MARK: - 진행 위치 송신 (플레이어 측, 1초)
+    private var positionTimer: Timer?
+
+    private func startPositionUpdates() {
+        stopPositionUpdates()
+        guard role == .player else { return }
+        let t = Timer(timeInterval: 1.0, repeats: true) { [weak self] _ in self?.sendPosition() }
+        RunLoop.main.add(t, forMode: .common)
+        positionTimer = t
+        sendPosition()
+    }
+
+    private func stopPositionUpdates() {
+        positionTimer?.invalidate()
+        positionTimer = nil
+    }
+
+    private func sendPosition() {
+        guard role == .player, multipeer.isConnected else { return }
+        let sp = MPMusicPlayerController.systemMusicPlayer
+        guard let item = sp.nowPlayingItem else { return }
+        let dur = item.playbackDuration
+        guard dur > 0 else { return }
+        let pos = PlaybackPosition(elapsed: sp.currentPlaybackTime,
+                                   duration: dur,
+                                   isPlaying: sp.playbackState == .playing)
+        multipeer.send(Packet(position: pos))
+    }
+
+    // MARK: - 곡정보 메타데이터/모드 보강 (플레이어 측)
+    private static let releaseYearFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "yyyy"; return f
+    }()
+
+    /// 작곡가·앨범아티스트·발매일·반복/셔플 모드를 채운다(라이브러리 곡 한정).
+    private func enrichNowPlaying(_ msg: NowPlayingMessage) -> NowPlayingMessage {
+        var r = msg
+        let sp = MPMusicPlayerController.systemMusicPlayer
+        if let item = sp.nowPlayingItem {
+            r.composer = item.composer
+            r.albumArtist = item.albumArtist
+            if let date = item.releaseDate {
+                r.releaseDate = Self.releaseYearFormatter.string(from: date)
+            }
+        }
+        r.repeatMode = Self.repeatCode(sp.repeatMode)
+        r.shuffleMode = (sp.shuffleMode == .off) ? 0 : 1
+        return r
+    }
+
+    /// 반복/셔플 토글 직후 즉시 갱신된 곡정보를 보낸다(MusicController 중복억제 우회).
+    private func sendEnrichedNowPlaying() {
+        guard let base = music.current else { return }
+        let enriched = enrichNowPlaying(base)
+        multipeer.send(Packet(nowPlaying: enriched))
+        DispatchQueue.main.async { self.nowPlaying = enriched }
+    }
+
+    private static func nextRepeat(_ mode: MPMusicRepeatMode) -> MPMusicRepeatMode {
+        switch mode {
+        case .none: return .all
+        case .all:  return .one
+        default:    return .none   // .one, .default → 없음
+        }
+    }
+
+    private static func repeatCode(_ mode: MPMusicRepeatMode) -> Int {
+        switch mode {
+        case .one: return 1
+        case .all: return 2
+        default:   return 0
         }
     }
 
