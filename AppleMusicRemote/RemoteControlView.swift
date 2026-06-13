@@ -127,18 +127,6 @@ struct RemoteControlView: View {
                         }
                         Image(systemName: "speaker.wave.3.fill").foregroundStyle(.secondary)
                     }
-
-                    // 볼륨 미세 조정 버튼
-                    HStack(spacing: 36) {
-                        Button { app.sendCommand(.volumeDown) } label: {
-                            Image(systemName: "minus.circle.fill")
-                        }
-                        Button { app.sendCommand(.volumeUp) } label: {
-                            Image(systemName: "plus.circle.fill")
-                        }
-                    }
-                    .font(compact ? .title2 : .title)
-                    .foregroundStyle(.tint)
                 }
                 .disabled(!net.isConnected)
                 .opacity(net.isConnected ? 1 : 0.4)
