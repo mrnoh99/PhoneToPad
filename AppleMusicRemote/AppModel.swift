@@ -2,6 +2,7 @@ import SwiftUI
 import Combine
 import UIKit
 import CoreImage
+import MediaPlayer
 
 enum DeviceRole: String {
     case unset      // 아직 역할 미선택
@@ -145,13 +146,14 @@ final class AppModel: ObservableObject {
                 self?.updateAccent(from: np.artworkJPEG)
             }
         }
-        // 플레이어 곡정보 변동 → 리모컨에 전송 + (이 기기에서도) 포인트 컬러 갱신
+        // 플레이어 곡정보 변동 → 앨범 트랙목록 보강 후 리모컨에 전송 + 포인트 컬러 갱신
         music.onNowPlayingChanged = { [weak self] np in
             guard let self else { return }
-            self.multipeer.send(Packet(command: nil, nowPlaying: np))
+            let enriched = self.enrichAlbumTracks(np)
+            self.multipeer.send(Packet(command: nil, nowPlaying: enriched))
             DispatchQueue.main.async {
-                self.nowPlaying = np
-                self.updateAccent(from: np.artworkJPEG)
+                self.nowPlaying = enriched
+                self.updateAccent(from: enriched.artworkJPEG)
             }
         }
         // 볼륨이 실제 반영된 뒤에야 정확한 값을 다시 전송
@@ -217,6 +219,36 @@ final class AppModel: ObservableObject {
         case .syncNowPlaying:
             music.invalidateAndRefresh()
         }
+    }
+
+    // MARK: - 현재 앨범 트랙 목록 (플레이어 측, 라이브러리 조회)
+    private var cachedAlbumID: MPMediaEntityPersistentID?
+    private var cachedAlbumTracks: [String] = []
+
+    /// 현재 재생 곡이 속한 앨범의 트랙 제목들을 라이브러리에서 조회해 메시지에 채운다.
+    /// (스트리밍 전용 등 라이브러리에 없는 앨범은 비어 있어 그대로 둠) — 앨범 단위로 캐시.
+    private func enrichAlbumTracks(_ msg: NowPlayingMessage) -> NowPlayingMessage {
+        guard let item = MPMusicPlayerController.systemMusicPlayer.nowPlayingItem else { return msg }
+        let albumID = item.albumPersistentID
+        guard albumID != 0 else { return msg }
+
+        if albumID != cachedAlbumID {
+            cachedAlbumID = albumID
+            let query = MPMediaQuery.songs()
+            query.addFilterPredicate(MPMediaPropertyPredicate(
+                value: albumID, forProperty: MPMediaItemPropertyAlbumPersistentID))
+            let items = (query.items ?? []).sorted {
+                if $0.discNumber != $1.discNumber { return $0.discNumber < $1.discNumber }
+                return $0.albumTrackNumber < $1.albumTrackNumber
+            }
+            cachedAlbumTracks = items.compactMap { $0.title }
+        }
+
+        guard !cachedAlbumTracks.isEmpty else { return msg }
+        var result = msg
+        result.albumTracks = cachedAlbumTracks
+        result.currentTrackIndex = cachedAlbumTracks.firstIndex(of: msg.title)
+        return result
     }
 
     // MARK: - 포인트 컬러(앨범아트 → 액센트)

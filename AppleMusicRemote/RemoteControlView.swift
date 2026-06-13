@@ -78,15 +78,25 @@ struct RemoteControlView: View {
 
                 if let np = app.nowPlaying,
                    !np.title.isEmpty, np.title != "재생 중인 곡 없음" {
-                    NowPlayingCard(np: np, artSize: artSize)
-                        // 앨범아트 뒤로 포인트 컬러 글로우
-                        .background(
-                            Circle()
-                                .fill(app.accent)
-                                .frame(width: artSize * 1.15, height: artSize * 1.15)
-                                .blur(radius: 70)
-                                .opacity(0.35)
-                        )
+                    VStack(spacing: compact ? 10 : 14) {
+                        NowPlayingCard(np: np, artSize: artSize)
+                            // 앨범아트 뒤로 포인트 컬러 글로우
+                            .background(
+                                Circle()
+                                    .fill(app.accent)
+                                    .frame(width: artSize * 1.15, height: artSize * 1.15)
+                                    .blur(radius: 70)
+                                    .opacity(0.35)
+                            )
+                        // 앨범 제목과 재생 버튼 사이: 현재 앨범의 트랙 목록(현재 곡 강조)
+                        if let tracks = np.albumTracks, !tracks.isEmpty {
+                            AlbumTrackList(tracks: tracks,
+                                           currentIndex: np.currentTrackIndex,
+                                           accent: app.accent,
+                                           maxWidth: artSize,
+                                           height: compact ? 104 : 150)
+                        }
+                    }
                 } else {
                     VStack(spacing: 8) {
                         ProgressView()
@@ -182,5 +192,61 @@ struct ControlButton: View {
                 .frame(width: diameter, height: diameter)
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// 현재 앨범의 트랙 목록 (현재 곡 강조 + 해당 위치로 자동 스크롤). 표시 전용.
+struct AlbumTrackList: View {
+    let tracks: [String]
+    let currentIndex: Int?
+    var accent: Color = .white
+    var maxWidth: CGFloat = 300
+    var height: CGFloat = 150
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView(.vertical, showsIndicators: false) {
+                VStack(spacing: 2) {
+                    ForEach(Array(tracks.enumerated()), id: \.offset) { idx, title in
+                        let isCurrent = idx == currentIndex
+                        HStack(spacing: 8) {
+                            if isCurrent {
+                                Image(systemName: "speaker.wave.2.fill")
+                                    .font(.caption2)
+                                    .foregroundStyle(accent)
+                                    .frame(width: 18, alignment: .center)
+                            } else {
+                                Text("\(idx + 1)")
+                                    .font(.caption2.monospacedDigit())
+                                    .foregroundStyle(.tertiary)
+                                    .frame(width: 18, alignment: .trailing)
+                            }
+                            Text(title)
+                                .font(.footnote)
+                                .fontWeight(isCurrent ? .semibold : .regular)
+                                .foregroundStyle(isCurrent ? .primary : .secondary)
+                                .lineLimit(1)
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 5)
+                        .padding(.horizontal, 10)
+                        .background(isCurrent ? accent.opacity(0.15) : Color.clear,
+                                    in: RoundedRectangle(cornerRadius: 8))
+                        .id(idx)
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .frame(maxWidth: maxWidth)
+            .frame(height: height)
+            .background(Color.white.opacity(0.04), in: RoundedRectangle(cornerRadius: 12))
+            .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color.white.opacity(0.08), lineWidth: 1))
+            .onAppear {
+                if let c = currentIndex { proxy.scrollTo(c, anchor: .center) }
+            }
+            .onChange(of: currentIndex) { _, new in
+                if let new { withAnimation { proxy.scrollTo(new, anchor: .center) } }
+            }
+        }
     }
 }
