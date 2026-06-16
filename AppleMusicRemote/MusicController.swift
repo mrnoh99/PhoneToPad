@@ -65,11 +65,22 @@ final class MusicController: ObservableObject {
         }
         systemRemote.startObserving()
 
+        if Platform.isMacLike {
+            MacNowPlayingFetcher.shared.onUpdated = { [weak self] in
+                DispatchQueue.main.async { self?.publishSync(force: true) }
+            }
+        }
+
         player.beginGeneratingPlaybackNotifications()
-        pollTimer = makeTimer(interval: 2.0) { [weak self] in self?.publishSync() }
+        let pollInterval = Platform.isMacLike ? 1.0 : 2.0
+        pollTimer = makeTimer(interval: pollInterval) { [weak self] in
+            self?.refreshMacNowPlayingIfNeeded { self?.publishSync() }
+        }
         startFastPoll()
-        systemRemote.refreshNowPlaying { [weak self] in
-            DispatchQueue.main.async { self?.publishBurst(force: true) }
+        refreshMacNowPlayingIfNeeded { [weak self] in
+            self?.systemRemote.refreshNowPlaying {
+                DispatchQueue.main.async { self?.publishBurst(force: true) }
+            }
         }
         publishBurst(force: true)
     }
@@ -84,10 +95,20 @@ final class MusicController: ObservableObject {
                 self.fastPollTimer?.invalidate()
                 return
             }
-            self.systemRemote.refreshNowPlaying { [weak self] in
-                DispatchQueue.main.async { self?.publishSync() }
+            self.refreshMacNowPlayingIfNeeded {
+                self.systemRemote.refreshNowPlaying { [weak self] in
+                    DispatchQueue.main.async { self?.publishSync() }
+                }
             }
         }
+    }
+
+    private func refreshMacNowPlayingIfNeeded(completion: @escaping () -> Void) {
+        guard Platform.isMacLike else {
+            completion()
+            return
+        }
+        MacNowPlayingFetcher.shared.refresh(completion: completion)
     }
 
     private func makeTimer(interval: TimeInterval, block: @escaping () -> Void) -> Timer {
@@ -104,8 +125,10 @@ final class MusicController: ObservableObject {
         cachedArtworkJPEG = nil
         cachedArtworkTrackID = nil
         startFastPoll()
-        systemRemote.refreshNowPlaying { [weak self] in
-            DispatchQueue.main.async { self?.publishBurst(force: true) }
+        refreshMacNowPlayingIfNeeded { [weak self] in
+            self?.systemRemote.refreshNowPlaying {
+                DispatchQueue.main.async { self?.publishBurst(force: true) }
+            }
         }
         publishBurst(force: true)
     }
@@ -113,9 +136,11 @@ final class MusicController: ObservableObject {
     /// 현재 상태를 읽어 @Published 갱신 + (변경됐을 때만) 콜백으로보냄
     func publish(force: Bool = false) {
         applyPublishedMessage(force: force)
-        systemRemote.refreshNowPlaying { [weak self] in
-            DispatchQueue.main.async {
-                self?.applyPublishedMessage(force: force)
+        refreshMacNowPlayingIfNeeded { [weak self] in
+            self?.systemRemote.refreshNowPlaying {
+                DispatchQueue.main.async {
+                    self?.applyPublishedMessage(force: force)
+                }
             }
         }
     }
@@ -191,14 +216,20 @@ final class MusicController: ObservableObject {
         let fromRemote = systemRemote.currentInfo().flatMap { messageFromInfoDict($0, volume: volume) }
         let fromCenter = MPNowPlayingInfoCenter.default().nowPlayingInfo
             .flatMap { messageFromInfoDict($0, volume: volume) }
+        let fromMacScript = MacNowPlayingFetcher.shared.currentInfo()
+            .flatMap { messageFromInfoDict($0, volume: volume) }
 
-        // 선택한 앱을 우선하되, 데이터가 없으면 다른 소스도 시도한다.
+        // Mac(Tahoe)에서는 osascript → MediaRemote → NowPlayingCenter 순. systemMusicPlayer 는 마지막.
         let order: [NowPlayingMessage?]
-        switch preferredSource {
-        case .music:
-            order = [fromSystem, fromRemote, fromCenter]
-        case .classical:
-            order = [fromRemote, fromCenter, fromSystem]
+        if Platform.isMacLike {
+            order = [fromMacScript, fromRemote, fromCenter, fromSystem]
+        } else {
+            switch preferredSource {
+            case .music:
+                order = [fromSystem, fromRemote, fromCenter]
+            case .classical:
+                order = [fromRemote, fromCenter, fromSystem]
+            }
         }
         for candidate in order {
             if let msg = candidate, isValidTrack(msg) { return msg }
@@ -275,6 +306,7 @@ final class MusicController: ObservableObject {
     private func stringValue(in info: [String: Any], keys: [String]) -> String {
         for key in keys {
             if let s = info[key] as? String, !s.isEmpty { return s }
+            if let s = info[key] as? NSString as String?, !s.isEmpty { return s }
         }
         return ""
     }
@@ -290,7 +322,8 @@ final class MusicController: ObservableObject {
             "artwork"
         ]
         for key in dataKeys {
-            guard let raw = info[key] as? Data, !raw.isEmpty else { continue }
+            let raw = (info[key] as? Data) ?? (info[key] as? NSData as Data?)
+            guard let raw, !raw.isEmpty else { continue }
             if let ui = UIImage(data: raw) {
                 return jpegData(from: ui)
             }
@@ -311,7 +344,13 @@ final class MusicController: ObservableObject {
         if let rate = info[SystemMediaRemote.InfoKey.playbackRate] as? Double {
             return rate > 0.01
         }
+        if let rate = (info[SystemMediaRemote.InfoKey.playbackRate] as? NSNumber)?.doubleValue {
+            return rate > 0.01
+        }
         if let rate = info[MPNowPlayingInfoPropertyPlaybackRate] as? Double {
+            return rate > 0.01
+        }
+        if let rate = (info[MPNowPlayingInfoPropertyPlaybackRate] as? NSNumber)?.doubleValue {
             return rate > 0.01
         }
         return false
@@ -320,7 +359,7 @@ final class MusicController: ObservableObject {
     // MARK: - 명령 (Music · Classical 공통)
 
     private var useSystemPlayerPath: Bool {
-        preferredSource == .music
+        preferredSource == .music && !Platform.isMacLike
     }
 
     private func sendPlayback(_ system: () -> Void, remote: SystemMediaRemote.Command) {

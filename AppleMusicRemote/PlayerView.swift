@@ -69,12 +69,19 @@ struct PlayerView: View {
                         Image(systemName: "music.note")
                             .font(.system(size: 48, weight: .thin))
                             .foregroundStyle(.secondary)
-                        Text(net.isConnected
-                             ? "\(app.musicSource.label) 앱에서 재생을 시작하세요"
-                             : "리모컨(아이폰) 연결을 기다리는 중")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .multilineTextAlignment(.center)
+                        if Platform.needsMacCatalystForNowPlaying {
+                            Text("Mac 플레이어는 Xcode에서 My Mac (Mac Catalyst)로 실행해야 곡 정보를 읽을 수 있습니다.")
+                                .font(.subheadline)
+                                .foregroundStyle(.orange)
+                                .multilineTextAlignment(.center)
+                        } else {
+                            Text(net.isConnected
+                                 ? "\(app.musicSource.label) 앱에서 재생을 시작하세요"
+                                 : "리모컨(아이폰) 연결을 기다리는 중")
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                                .multilineTextAlignment(.center)
+                        }
                     }
                     .frame(height: artSize)
                 }

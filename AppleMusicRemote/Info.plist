@@ -24,6 +24,8 @@
 	<!-- systemMusicPlayer / 미디어 라이브러리 접근 (플레이어=아이패드 측) -->
 	<key>NSAppleMusicUsageDescription</key>
 	<string>아이패드에서 Apple Music·Classical 재생 정보를 읽고 재생을 제어하기 위해 미디어 라이브러리 접근이 필요합니다.</string>
+	<key>NSAppleEventsUsageDescription</key>
+	<string>Mac에서 Music 앱의 현재 재생 곡 정보를 읽기 위해 Apple Events 접근이 필요합니다.</string>
 
 	<!-- MultipeerConnectivity 로컬 네트워크 -->
 	<key>NSLocalNetworkUsageDescription</key>

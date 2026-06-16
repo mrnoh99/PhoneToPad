@@ -89,22 +89,72 @@ final class SystemMediaRemote {
     }
 
     func refreshNowPlaying(completion: (() -> Void)? = nil) {
-        guard let getNowPlaying else {
+        let apply: ([String: Any]?) -> Void = { [weak self] info in
+            self?.infoLock.lock()
+            self?.cachedInfo = info
+            self?.infoLock.unlock()
             completion?()
+        }
+        guard let getNowPlaying else {
+            apply(fallbackNowPlayingInfo())
             return
         }
         getNowPlaying(DispatchQueue.main) { [weak self] dict in
-            self?.infoLock.lock()
-            self?.cachedInfo = dict as? [String: Any]
-            self?.infoLock.unlock()
-            completion?()
+            let parsed = dict as? [String: Any]
+            if let parsed, Self.hasTrackMetadata(parsed) {
+                apply(parsed)
+                return
+            }
+            apply(self?.fallbackNowPlayingInfo() ?? parsed)
         }
     }
 
     func currentInfo() -> [String: Any]? {
         infoLock.lock()
         defer { infoLock.unlock() }
+        if let cachedInfo, Self.hasTrackMetadata(cachedInfo) { return cachedInfo }
+        if let fallback = fallbackNowPlayingInfo() {
+            cachedInfo = fallback
+            return fallback
+        }
         return cachedInfo
+    }
+
+    /// Mac(Catalyst / iOS-on-Mac)에서는 systemMusicPlayer 대신 MediaRemote 경로가 필요하다.
+    /// macOS 15.4+ 에서 GetNowPlayingInfo 가 비면 MRNowPlayingRequest 로 한 번 더 시도한다.
+    private func fallbackNowPlayingInfo() -> [String: Any]? {
+        guard Platform.isMacLike else { return nil }
+        return Self.fetchViaNowPlayingRequest()
+    }
+
+    private static func hasTrackMetadata(_ info: [String: Any]) -> Bool {
+        let titleKeys = [InfoKey.title, MPMediaItemPropertyTitle, "title", "Name"]
+        return titleKeys.contains { key in
+            guard let value = info[key] as? String else { return false }
+            return !value.isEmpty
+        }
+    }
+
+    private static func ensureMediaRemoteLoaded() {
+        dlopen("/System/Library/PrivateFrameworks/MediaRemote.framework/MediaRemote", RTLD_NOW)
+    }
+
+    private static func fetchViaNowPlayingRequest() -> [String: Any]? {
+        ensureMediaRemoteLoaded()
+        guard let requestClass = NSClassFromString("MRNowPlayingRequest") as? NSObject.Type else { return nil }
+        let itemSelector = NSSelectorFromString("localNowPlayingItem")
+        guard requestClass.responds(to: itemSelector),
+              let item = requestClass.perform(itemSelector)?.takeUnretainedValue() as? NSObject
+        else { return nil }
+
+        let infoSelector = NSSelectorFromString("nowPlayingInfo")
+        guard item.responds(to: infoSelector),
+              let infoObject = item.perform(infoSelector)?.takeUnretainedValue()
+        else { return nil }
+
+        if let dict = infoObject as? [String: Any], Self.hasTrackMetadata(dict) { return dict }
+        if let dict = (infoObject as? NSDictionary) as? [String: Any], Self.hasTrackMetadata(dict) { return dict }
+        return nil
     }
 
     @discardableResult
