@@ -91,9 +91,9 @@ struct RemoteControlView: View {
                                     .blur(radius: 70)
                                     .opacity(0.35)
                             )
-                        // 사이공간: 카탈로그 상세(MusicKit/iTunes) 또는 시스템 메타데이터
-                        if let cat = np.catalog {
-                            CatalogInfoView(info: cat, maxWidth: artSize)
+                        // 사이공간: 카탈로그 상세(+가사) 또는 시스템 메타데이터
+                        if np.catalog != nil || np.lyrics?.isEmpty == false {
+                            CatalogInfoView(info: np.catalog, lyrics: np.lyrics, maxWidth: artSize)
                         } else {
                             TrackMetaView(np: np, maxWidth: artSize)
                         }
@@ -279,11 +279,14 @@ struct TrackMetaView: View {
     }
 }
 
-/// 카탈로그(MusicKit/iTunes) 상세 정보 — 헤더 탭으로 펼치기/접기.
+/// 카탈로그(MusicKit/iTunes) 상세 정보 + (있으면)내장 가사 — 헤더 탭으로 펼치기/접기.
 struct CatalogInfoView: View {
-    let info: CatalogInfo
+    var info: CatalogInfo? = nil
+    var lyrics: String? = nil
     var maxWidth: CGFloat = 300
     @State private var expanded = false
+
+    private var hasLyrics: Bool { (lyrics?.isEmpty == false) }
 
     var body: some View {
         VStack(spacing: 4) {
@@ -297,7 +300,10 @@ struct CatalogInfoView: View {
                         .rotationEffect(.degrees(expanded ? 90 : 0))
                     Text("상세 정보")
                         .font(.caption.weight(.semibold))
-                    if let s = info.source, !s.isEmpty {
+                    if hasLyrics {
+                        Image(systemName: "quote.bubble").font(.caption2).foregroundStyle(.tertiary)
+                    }
+                    if let s = info?.source, !s.isEmpty {
                         Text(s).font(.caption2).foregroundStyle(.tertiary)
                     }
                     Spacer(minLength: 0)
@@ -309,24 +315,39 @@ struct CatalogInfoView: View {
 
             if expanded {
                 VStack(spacing: 2) {
-                    if let v = info.workName, !v.isEmpty { row("작품", v) }
-                    if let m = movementText { row("악장", m) }
-                    if let v = info.composerName, !v.isEmpty { row("작곡", v) }
-                    if let g = info.genres, !g.isEmpty { row("장르", g.joined(separator: ", ")) }
-                    if let v = info.albumTitle, !v.isEmpty { row("앨범", v) }
-                    if let t = trackText { row("트랙", t) }
-                    if let d = info.durationSeconds, d > 0 { row("길이", timeString(d)) }
-                    if let v = info.releaseDate, !v.isEmpty { row("발매", v) }
-                    if info.isExplicit == true { row("등급", "Explicit") }
-                    if let v = info.isrc, !v.isEmpty { row("ISRC", v) }
-                    if let urlStr = info.appleMusicURL, let url = URL(string: urlStr) {
-                        HStack(spacing: 8) {
-                            Text("Apple Music")
-                                .font(.caption2).foregroundStyle(.tertiary)
-                                .frame(width: 76, alignment: .leading)
-                            Link("열기", destination: url).font(.caption)
-                            Spacer(minLength: 0)
+                    if let info {
+                        if let v = info.workName, !v.isEmpty { row("작품", v) }
+                        if let m = movementText { row("악장", m) }
+                        if let v = info.composerName, !v.isEmpty { row("작곡", v) }
+                        if let g = info.genres, !g.isEmpty { row("장르", g.joined(separator: ", ")) }
+                        if let v = info.albumTitle, !v.isEmpty { row("앨범", v) }
+                        if let t = trackText { row("트랙", t) }
+                        if let d = info.durationSeconds, d > 0 { row("길이", timeString(d)) }
+                        if let v = info.releaseDate, !v.isEmpty { row("발매", v) }
+                        if info.isExplicit == true { row("등급", "Explicit") }
+                        if let v = info.isrc, !v.isEmpty { row("ISRC", v) }
+                        if let urlStr = info.appleMusicURL, let url = URL(string: urlStr) {
+                            HStack(spacing: 8) {
+                                Text("Apple Music")
+                                    .font(.caption2).foregroundStyle(.tertiary)
+                                    .frame(width: 76, alignment: .leading)
+                                Link("열기", destination: url).font(.caption)
+                                Spacer(minLength: 0)
+                            }
                         }
+                    }
+                    if let ly = lyrics, !ly.isEmpty {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("가사")
+                                .font(.caption2.weight(.semibold))
+                                .foregroundStyle(.tertiary)
+                            Text(ly)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
+                        .padding(.top, 4)
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
@@ -336,14 +357,14 @@ struct CatalogInfoView: View {
     }
 
     private var movementText: String? {
-        guard let name = info.movementName, !name.isEmpty else { return nil }
+        guard let info, let name = info.movementName, !name.isEmpty else { return nil }
         if let n = info.movementNumber, let c = info.movementCount { return "\(name) (\(n)/\(c))" }
         if let n = info.movementNumber { return "\(name) (\(n))" }
         return name
     }
 
     private var trackText: String? {
-        guard let t = info.trackNumber else { return nil }
+        guard let info, let t = info.trackNumber else { return nil }
         if let d = info.discNumber, d > 1 { return "Disc \(d) · \(t)" }
         return "\(t)"
     }

@@ -56,9 +56,9 @@ struct PlayerView: View {
                                     .blur(radius: 70)
                                     .opacity(0.35)
                             )
-                        // 사이공간: 카탈로그 상세(MusicKit/iTunes) 또는 시스템 메타데이터
-                        if let cat = np.catalog {
-                            CatalogInfoView(info: cat, maxWidth: artSize)
+                        // 사이공간: 카탈로그 상세(+가사) 또는 시스템 메타데이터
+                        if np.catalog != nil || np.lyrics?.isEmpty == false {
+                            CatalogInfoView(info: np.catalog, lyrics: np.lyrics, maxWidth: artSize)
                         } else {
                             TrackMetaView(np: np, maxWidth: artSize)
                         }

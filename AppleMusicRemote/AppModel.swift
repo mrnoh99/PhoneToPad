@@ -332,6 +332,7 @@ final class AppModel: ObservableObject {
             if let date = item.releaseDate {
                 r.releaseDate = Self.releaseYearFormatter.string(from: date)
             }
+            if let ly = item.lyrics, !ly.isEmpty { r.lyrics = ly }   // 내장 가사(있을 때만)
         }
         r.repeatMode = Self.repeatCode(sp.repeatMode)
         r.shuffleMode = (sp.shuffleMode == .off) ? 0 : 1

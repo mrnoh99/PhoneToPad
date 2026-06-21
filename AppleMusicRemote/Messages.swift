@@ -36,6 +36,8 @@ struct NowPlayingMessage: Codable, Equatable {
     var releaseDate: String? = nil
     var repeatMode: Int? = nil      // 0 없음, 1 한곡, 2 전체
     var shuffleMode: Int? = nil     // 0 끔, 1 켬
+    /// 라이브러리 곡에 내장된 가사(있을 때만) — Apple Music 싱크 가사는 불가
+    var lyrics: String? = nil
     /// MusicKit/iTunes 카탈로그에서 받아온 상세 정보
     var catalog: CatalogInfo? = nil
 }
