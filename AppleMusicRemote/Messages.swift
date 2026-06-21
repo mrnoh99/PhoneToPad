@@ -36,6 +36,27 @@ struct NowPlayingMessage: Codable, Equatable {
     var releaseDate: String? = nil
     var repeatMode: Int? = nil      // 0 없음, 1 한곡, 2 전체
     var shuffleMode: Int? = nil     // 0 끔, 1 켬
+    /// MusicKit/iTunes 카탈로그에서 받아온 상세 정보
+    var catalog: CatalogInfo? = nil
+}
+
+/// MusicKit(우선) 또는 iTunes 검색으로 얻은 카탈로그 상세 정보 — 화면에 표시용
+struct CatalogInfo: Codable, Equatable {
+    var source: String? = nil          // "MusicKit" / "iTunes"
+    var workName: String? = nil        // 작품(클래식)
+    var movementName: String? = nil    // 악장(클래식)
+    var movementNumber: Int? = nil
+    var movementCount: Int? = nil
+    var composerName: String? = nil
+    var genres: [String]? = nil
+    var albumTitle: String? = nil
+    var trackNumber: Int? = nil
+    var discNumber: Int? = nil
+    var durationSeconds: Double? = nil
+    var releaseDate: String? = nil
+    var isExplicit: Bool? = nil
+    var isrc: String? = nil
+    var appleMusicURL: String? = nil
 }
 
 /// 재생 진행 위치 (자주 전송되는 가벼운 패킷 — 앨범아트 미포함)

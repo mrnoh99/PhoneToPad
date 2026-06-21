@@ -166,7 +166,7 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async {
                 self.nowPlaying = enriched
                 self.updateAccent(from: enriched.artworkJPEG)
-                self.fetchCatalogArtIfNeeded(for: enriched)
+                self.fetchCatalogInfo(for: enriched)
             }
         }
         // 볼륨이 실제 반영된 뒤에야 정확한 값을 다시 전송
@@ -335,6 +335,7 @@ final class AppModel: ObservableObject {
         }
         r.repeatMode = Self.repeatCode(sp.repeatMode)
         r.shuffleMode = (sp.shuffleMode == .off) ? 0 : 1
+        r.catalog = catalogByTrack[trackKey(msg)]   // 카탈로그 정보가 캐시돼 있으면 함께 실어 보냄
         return r
     }
 
@@ -346,20 +347,32 @@ final class AppModel: ObservableObject {
         DispatchQueue.main.async { self.nowPlaying = enriched }
     }
 
-    /// 시스템에서 아트를 못 얻은 경우(스트리밍 등) Apple Music 카탈로그에서 폴백으로 받아온다.
-    private func fetchCatalogArtIfNeeded(for msg: NowPlayingMessage) {
+    /// 카탈로그(MusicKit/iTunes)에서 상세 정보 + (필요 시)앨범아트를 받아 화면·전송에 반영한다.
+    private var catalogByTrack: [String: CatalogInfo] = [:]
+    private func trackKey(_ m: NowPlayingMessage) -> String { "\(m.title)|\(m.artist)".lowercased() }
+
+    private func fetchCatalogInfo(for msg: NowPlayingMessage) {
         guard role == .player else { return }
-        guard msg.artworkJPEG?.isEmpty != false else { return }      // 이미 아트가 있으면 패스
         let title = msg.title, artist = msg.artist, album = msg.album
         guard !title.isEmpty, title != "재생 중인 곡 없음" else { return }
-        CatalogArtworkFetcher.shared.artwork(title: title, artist: artist, album: album) { [weak self] data in
-            guard let self, let data, !data.isEmpty else { return }
+        let k = trackKey(msg)
+        // 이미 카탈로그 정보가 있고 아트도 있으면 다시 조회할 필요 없음
+        if catalogByTrack[k] != nil, msg.artworkJPEG?.isEmpty == false { return }
+
+        CatalogArtworkFetcher.shared.lookup(title: title, artist: artist, album: album) { [weak self] result in
+            guard let self else { return }
             guard self.nowPlaying?.title == title else { return }     // 그새 곡이 바뀌었으면 폐기
-            var withArt = self.nowPlaying ?? msg
-            withArt.artworkJPEG = data
-            self.nowPlaying = withArt
-            self.updateAccent(from: data)
-            self.multipeer.send(Packet(nowPlaying: withArt))
+            if let info = result.info { self.catalogByTrack[k] = info }
+
+            var updated = self.nowPlaying ?? msg
+            if updated.artworkJPEG?.isEmpty != false, let data = result.artwork, !data.isEmpty {
+                updated.artworkJPEG = data
+                self.updateAccent(from: data)
+            }
+            if let info = result.info { updated.catalog = info }
+            guard updated != self.nowPlaying else { return }
+            self.nowPlaying = updated
+            self.multipeer.send(Packet(nowPlaying: updated))
         }
     }
 

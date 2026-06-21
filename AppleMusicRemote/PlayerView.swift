@@ -56,8 +56,12 @@ struct PlayerView: View {
                                     .blur(radius: 70)
                                     .opacity(0.35)
                             )
-                        // 사이공간: 작곡가 / 앨범 아티스트 / 발매일 (리모컨과 동일)
-                        TrackMetaView(np: np, maxWidth: artSize)
+                        // 사이공간: 카탈로그 상세(MusicKit/iTunes) 또는 시스템 메타데이터
+                        if let cat = np.catalog {
+                            CatalogInfoView(info: cat, maxWidth: artSize)
+                        } else {
+                            TrackMetaView(np: np, maxWidth: artSize)
+                        }
                         // 진행바 + 경과/남은 시간 (위치 정보가 있을 때만 표시)
                         if app.playback != nil {
                             ProgressBar(app: app, accent: app.accent)
