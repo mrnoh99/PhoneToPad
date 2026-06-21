@@ -166,6 +166,7 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async {
                 self.nowPlaying = enriched
                 self.updateAccent(from: enriched.artworkJPEG)
+                self.fetchCatalogArtIfNeeded(for: enriched)
             }
         }
         // 볼륨이 실제 반영된 뒤에야 정확한 값을 다시 전송
@@ -343,6 +344,23 @@ final class AppModel: ObservableObject {
         let enriched = enrichNowPlaying(base)
         multipeer.send(Packet(nowPlaying: enriched))
         DispatchQueue.main.async { self.nowPlaying = enriched }
+    }
+
+    /// 시스템에서 아트를 못 얻은 경우(스트리밍 등) Apple Music 카탈로그에서 폴백으로 받아온다.
+    private func fetchCatalogArtIfNeeded(for msg: NowPlayingMessage) {
+        guard role == .player else { return }
+        guard msg.artworkJPEG?.isEmpty != false else { return }      // 이미 아트가 있으면 패스
+        let title = msg.title, artist = msg.artist, album = msg.album
+        guard !title.isEmpty, title != "재생 중인 곡 없음" else { return }
+        CatalogArtworkFetcher.shared.artwork(title: title, artist: artist, album: album) { [weak self] data in
+            guard let self, let data, !data.isEmpty else { return }
+            guard self.nowPlaying?.title == title else { return }     // 그새 곡이 바뀌었으면 폐기
+            var withArt = self.nowPlaying ?? msg
+            withArt.artworkJPEG = data
+            self.nowPlaying = withArt
+            self.updateAccent(from: data)
+            self.multipeer.send(Packet(nowPlaying: withArt))
+        }
     }
 
     private static func nextRepeat(_ mode: MPMusicRepeatMode) -> MPMusicRepeatMode {
