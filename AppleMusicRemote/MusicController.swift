@@ -236,12 +236,12 @@ final class MusicController: ObservableObject {
         guard var best = candidates.first(where: { isValidTrack($0) }) else {
             return emptyMessage(volume: volume)
         }
-        // 앨범아트가 비어 있으면 같은 곡인 다른 소스의 아트로 채운다.
-        // (스트리밍 곡은 systemMusicPlayer 에 아트가 없고 MediaRemote 쪽에만 있는 경우가 많다)
+        // 앨범아트가 비어 있으면 다른 소스의 아트로 채운다.
+        // (스트리밍 곡은 systemMusicPlayer 에 아트가 없고 MediaRemote 쪽에만 있는 경우가 많다.
+        //  같은 제목 소스를 우선하되, 제목 문자열이 미세하게 달라도 현재 재생 중이면 사용)
         if best.artworkJPEG?.isEmpty != false {
-            if let withArt = candidates.first(where: {
-                ($0.artworkJPEG?.isEmpty == false) && $0.title == best.title
-            }) {
+            let arted = candidates.filter { $0.artworkJPEG?.isEmpty == false }
+            if let withArt = arted.first(where: { $0.title == best.title }) ?? arted.first {
                 best.artworkJPEG = withArt.artworkJPEG
             }
         }
