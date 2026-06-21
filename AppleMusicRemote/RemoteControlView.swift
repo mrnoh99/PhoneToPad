@@ -279,37 +279,57 @@ struct TrackMetaView: View {
     }
 }
 
-/// 카탈로그(MusicKit/iTunes) 상세 정보 — 있는 항목을 모두 표시한다.
+/// 카탈로그(MusicKit/iTunes) 상세 정보 — 헤더 탭으로 펼치기/접기.
 struct CatalogInfoView: View {
     let info: CatalogInfo
     var maxWidth: CGFloat = 300
+    @State private var expanded = false
 
     var body: some View {
-        VStack(spacing: 2) {
-            if let v = info.workName, !v.isEmpty { row("작품", v) }
-            if let m = movementText { row("악장", m) }
-            if let v = info.composerName, !v.isEmpty { row("작곡", v) }
-            if let g = info.genres, !g.isEmpty { row("장르", g.joined(separator: ", ")) }
-            if let v = info.albumTitle, !v.isEmpty { row("앨범", v) }
-            if let t = trackText { row("트랙", t) }
-            if let d = info.durationSeconds, d > 0 { row("길이", timeString(d)) }
-            if let v = info.releaseDate, !v.isEmpty { row("발매", v) }
-            if info.isExplicit == true { row("등급", "Explicit") }
-            if let v = info.isrc, !v.isEmpty { row("ISRC", v) }
-            if let urlStr = info.appleMusicURL, let url = URL(string: urlStr) {
-                HStack(spacing: 8) {
-                    Text("Apple Music")
-                        .font(.caption2).foregroundStyle(.tertiary)
-                        .frame(width: 76, alignment: .leading)
-                    Link("열기", destination: url).font(.caption)
+        VStack(spacing: 4) {
+            // 펼치기/접기 토글 헤더
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right")
+                        .font(.caption2.weight(.semibold))
+                        .rotationEffect(.degrees(expanded ? 90 : 0))
+                    Text("상세 정보")
+                        .font(.caption.weight(.semibold))
+                    if let s = info.source, !s.isEmpty {
+                        Text(s).font(.caption2).foregroundStyle(.tertiary)
+                    }
                     Spacer(minLength: 0)
                 }
+                .foregroundStyle(.secondary)
+                .contentShape(Rectangle())
             }
-            if let s = info.source, !s.isEmpty {
-                Text("출처: \(s)")
-                    .font(.caption2)
-                    .foregroundStyle(.quaternary)
-                    .frame(maxWidth: .infinity, alignment: .trailing)
+            .buttonStyle(.plain)
+
+            if expanded {
+                VStack(spacing: 2) {
+                    if let v = info.workName, !v.isEmpty { row("작품", v) }
+                    if let m = movementText { row("악장", m) }
+                    if let v = info.composerName, !v.isEmpty { row("작곡", v) }
+                    if let g = info.genres, !g.isEmpty { row("장르", g.joined(separator: ", ")) }
+                    if let v = info.albumTitle, !v.isEmpty { row("앨범", v) }
+                    if let t = trackText { row("트랙", t) }
+                    if let d = info.durationSeconds, d > 0 { row("길이", timeString(d)) }
+                    if let v = info.releaseDate, !v.isEmpty { row("발매", v) }
+                    if info.isExplicit == true { row("등급", "Explicit") }
+                    if let v = info.isrc, !v.isEmpty { row("ISRC", v) }
+                    if let urlStr = info.appleMusicURL, let url = URL(string: urlStr) {
+                        HStack(spacing: 8) {
+                            Text("Apple Music")
+                                .font(.caption2).foregroundStyle(.tertiary)
+                                .frame(width: 76, alignment: .leading)
+                            Link("열기", destination: url).font(.caption)
+                            Spacer(minLength: 0)
+                        }
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
         .frame(maxWidth: maxWidth)
