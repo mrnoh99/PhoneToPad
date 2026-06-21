@@ -231,10 +231,21 @@ final class MusicController: ObservableObject {
                 order = [fromRemote, fromCenter, fromSystem]
             }
         }
-        for candidate in order {
-            if let msg = candidate, isValidTrack(msg) { return msg }
+        let candidates = order.compactMap { $0 }
+        // 텍스트는 제목이 유효한 첫 소스 기준
+        guard var best = candidates.first(where: { isValidTrack($0) }) else {
+            return emptyMessage(volume: volume)
         }
-        return emptyMessage(volume: volume)
+        // 앨범아트가 비어 있으면 같은 곡인 다른 소스의 아트로 채운다.
+        // (스트리밍 곡은 systemMusicPlayer 에 아트가 없고 MediaRemote 쪽에만 있는 경우가 많다)
+        if best.artworkJPEG?.isEmpty != false {
+            if let withArt = candidates.first(where: {
+                ($0.artworkJPEG?.isEmpty == false) && $0.title == best.title
+            }) {
+                best.artworkJPEG = withArt.artworkJPEG
+            }
+        }
+        return best
     }
 
     private func isValidTrack(_ msg: NowPlayingMessage) -> Bool {
