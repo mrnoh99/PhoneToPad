@@ -1,6 +1,13 @@
 import SwiftUI
 import UIKit
 
+/// 앱 버전/빌드 및 제작자 크레딧 문자열
+enum AppInfo {
+    static var version: String { Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "?" }
+    static var build: String { Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?" }
+    static var credit: String { "Developed by JaiSung NOH MD., 2026  ·  v\(version) (\(build))" }
+}
+
 struct ContentView: View {
     @EnvironmentObject var app: AppModel
     @Environment(\.scenePhase) private var scenePhase
@@ -108,7 +115,7 @@ struct RolePickerView: View {
                 .padding(.horizontal, 32)
             Spacer()
 
-            Text("Developed by JaiSung NOH MD · 2026")
+            Text(AppInfo.credit)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
         }

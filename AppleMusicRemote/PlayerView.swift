@@ -97,7 +97,7 @@ struct PlayerView: View {
                                   playIcon: playIcon, sideIcon: sideIcon)
                 volumeControls(compact: compact)
 
-                Text("Developed by JaiSung NOH MD · 2026")
+                Text(AppInfo.credit)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }

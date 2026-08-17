@@ -167,7 +167,7 @@ struct RemoteControlView: View {
                 .disabled(!net.isConnected)
                 .opacity(net.isConnected ? 1 : 0.4)
 
-                Text("Developed by JaiSung NOH MD · 2026")
+                Text(AppInfo.credit)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
             }
