@@ -1,10 +1,9 @@
-# XcodeGen 결과물 (project.yml 로 재생성)
-*.xcodeproj
-
 # Xcode / Swift
 .DS_Store
 xcuserdata/
-*.xcworkspace
 DerivedData/
 build/
 .swiftpm/
+
+# XcodeGen 입력(project.yml)로 재생성할 수 있지만, 클론 후 바로 열 수 있도록
+# PhoneToPad.xcodeproj 는 저장소에 포함한다. (사용자별 설정 xcuserdata 는 위에서 제외)

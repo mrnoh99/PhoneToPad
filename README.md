@@ -55,17 +55,31 @@ AppleMusicRemote/
 
 ## 빌드 & 설치
 
-1. **XcodeGen 설치 후 프로젝트 생성**
+1. **클론 후 바로 Xcode 로 열기** — 별도 생성 단계 없이 그대로 열립니다.
+   ```sh
+   git clone https://github.com/mrnoh99/PhoneToPad.git
+   cd PhoneToPad
+   open PhoneToPad.xcodeproj      # Xcode 16+ (권장: Xcode 26.x)
+   ```
+   > `PhoneToPad.xcodeproj` 는 저장소에 포함돼 있습니다. 소스 폴더(`AppleMusicRemote`)는
+   > **파일시스템 동기화 그룹**이라, 파일을 추가/삭제해도 Xcode 가 자동 반영합니다.
+   > (Xcode 16 이상 필요 — 동기화 그룹 기능)
+
+   <details><summary>대안: XcodeGen 으로 재생성</summary>
+
    ```sh
    brew install xcodegen
-   cd PhoneToPad
-   xcodegen generate          # PhoneToPad.xcodeproj 생성
-   open PhoneToPad.xcodeproj
+   xcodegen generate             # project.yml → PhoneToPad.xcodeproj 재생성
    ```
-2. **서명**: Signing & Capabilities 에서 본인 Apple ID 팀 선택
-   (무료 계정 = 7일마다 재설치 / 유료 계정 = 1년)
+   `project.yml` 이 빌드 설정의 원본입니다. 설정을 바꿀 땐 `project.yml` 을 고치고
+   재생성하는 것을 권장합니다(그래야 커밋된 .xcodeproj 와 어긋나지 않습니다).
+   </details>
+
+2. **서명**: 타겟 → Signing & Capabilities 에서 본인 Apple ID 팀 선택
+   (무료 계정 = 7일마다 재설치 / 유료 계정 = 1년). 기본 팀 ID 가 박혀 있으니 본인 팀으로 바꾸세요.
    - 빌드엔 **iOS 26 SDK 지원 Xcode(=Xcode 26.x)** 필요(아이폰 26.5 설치용).
    - Deployment Target 은 **iOS 17.0** (아이패드 17.7 도 설치 가능).
+   - (선택) 스트리밍 앨범아트·상세정보를 위해 **MusicKit** 을 켜려면 개발자 포털 App ID → App Services 에서 MusicKit 체크.
 3. **두 기기 모두**에 같은 앱을 설치하고 **같은 WiFi + Bluetooth ON**.
 
 ## 사용법
