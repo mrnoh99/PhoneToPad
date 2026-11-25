@@ -339,8 +339,17 @@ final class MusicLibraryProvider {
     }
 
     /// 카탈로그 앨범 ID 로 수록곡(디스크/트랙 순)을 받아온다.
+    /// 한국(KR) 등 곡 단위 판매가 없는 스토어는 앨범 정보만 주고 수록곡을 비워 보내므로,
+    /// 수록곡이 없으면 지역 지정 없이 다시 조회한다. (트랙 ID 는 스토어 공통이라 그대로 재생 가능)
     private func catalogAlbum(collectionID: String) async -> CatalogAlbum? {
-        guard let results = await lookup(["id": collectionID, "entity": "song", "limit": "200"]) else { return nil }
+        let params = ["id": collectionID, "entity": "song", "limit": "200"]
+        let base = "https://itunes.apple.com/lookup"
+        let hasTracks: ([ITunesItem]?) -> Bool = { $0?.contains { $0.wrapperType == "track" } ?? false }
+        var results = await fetch(base, params, country: Locale.current.region?.identifier)
+        if !hasTracks(results) {
+            results = await fetch(base, params, country: nil) ?? results
+        }
+        guard let results else { return nil }
         let header = results.first { $0.wrapperType == "collection" }
         let tracks = results.filter { $0.wrapperType == "track" }
             .sorted { ($0.discNumber ?? 1, $0.trackNumber ?? 0) < ($1.discNumber ?? 1, $1.trackNumber ?? 0) }
@@ -380,7 +389,8 @@ final class MusicLibraryProvider {
     private func request(_ base: String, _ params: [String: String]) async -> [ITunesItem]? {
         let region = Locale.current.region?.identifier
         let first = await fetch(base, params, country: region)
-        if let first, !first.isEmpty { return first }
+        // 결과가 없거나 곡(track)이 하나도 없으면(KR 스토어 등) 지역 지정 없이 다시 조회
+        if let first, first.contains(where: { $0.wrapperType == "track" }) { return first }
         guard region != nil else { return first }
         return await fetch(base, params, country: nil) ?? first
     }
