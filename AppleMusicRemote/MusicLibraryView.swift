@@ -27,16 +27,27 @@ struct MusicLibraryView: View {
 
     @State private var category: LibraryCategory = .playlists
     @State private var searchText = ""
+    @State private var path = NavigationPath()
+    /// '현재 재생 중인 플레이리스트' 응답을 기다리는 중
+    @State private var waitingCurrentPlaylist = false
+    @State private var currentPlaylistError: String?
+
+    private let currentPlaylistRequest = LibraryRequest(category: .playlists, current: true)
 
     var body: some View {
-        NavigationStack {
+        NavigationStack(path: $path) {
             VStack(spacing: 0) {
                 Picker("분류", selection: $category) {
                     ForEach(LibraryCategory.allCases) { Text($0.label).tag($0) }
                 }
                 .pickerStyle(.segmented)
                 .padding(.horizontal, 16)
-                .padding(.vertical, 8)
+                .padding(.top, 8)
+                .padding(.bottom, category == .playlists ? 4 : 8)
+
+                if category == .playlists {
+                    currentPlaylistButton
+                }
 
                 switch category {
                 case .playlists:
@@ -62,6 +73,60 @@ struct MusicLibraryView: View {
             }
         }
         .onChange(of: category) { _, _ in searchText = "" }
+        // '현재 재생 중인 플레이리스트' 응답이 오면 그 플레이리스트 화면으로 이동
+        .onChange(of: app.libraryLists[currentPlaylistRequest]) { _, list in
+            guard waitingCurrentPlaylist, let list else { return }
+            waitingCurrentPlaylist = false
+            if let cid = list.collectionID, list.error == nil {
+                var newPath = NavigationPath()
+                newPath.append(LibraryCollectionRef(category: .playlists, id: cid,
+                                                    title: list.collectionTitle ?? "플레이리스트",
+                                                    subtitle: list.collectionSubtitle))
+                path = newPath
+            } else {
+                currentPlaylistError = list.error ?? "재생 중인 플레이리스트를 찾지 못했습니다."
+            }
+        }
+        // 응답 없이 요청이 끝나면(타임아웃) 대기 표시 해제
+        .onChange(of: app.libraryLoading.contains(currentPlaylistRequest)) { _, loading in
+            if !loading, app.libraryLists[currentPlaylistRequest] == nil { waitingCurrentPlaylist = false }
+        }
+        .alert("현재 플레이리스트", isPresented: Binding(
+            get: { currentPlaylistError != nil },
+            set: { if !$0 { currentPlaylistError = nil } })) {
+            Button("확인", role: .cancel) {}
+        } message: {
+            Text(currentPlaylistError ?? "")
+        }
+    }
+
+    /// 지금 재생 중인 플레이리스트를 다시 여는 버튼
+    private var currentPlaylistButton: some View {
+        Button {
+            waitingCurrentPlaylist = true
+            app.requestCurrent(.playlists)
+        } label: {
+            HStack(spacing: 8) {
+                if waitingCurrentPlaylist {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Image(systemName: "waveform")
+                }
+                Text("현재 재생 중인 플레이리스트")
+                    .font(.callout.weight(.semibold))
+                Spacer(minLength: 0)
+                Image(systemName: "chevron.right").font(.caption.weight(.semibold))
+            }
+            .foregroundStyle(app.accent)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 10)
+            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+        .disabled(!net.isConnected || waitingCurrentPlaylist)
+        .opacity(net.isConnected ? 1 : 0.4)
+        .padding(.horizontal, 16)
+        .padding(.bottom, 6)
     }
 
     private func refresh() {
@@ -69,9 +134,7 @@ struct MusicLibraryView: View {
         case .playlists:
             app.requestLibrary(.playlistTree, force: true)
         case .albums:
-            if let id = app.nowPlaying?.albumID {
-                app.requestLibrary(LibraryRequest(category: .albums, collectionID: id), force: true)
-            }
+            app.requestCurrent(.albums)
         }
     }
 }
@@ -219,41 +282,64 @@ struct LibraryCollectionView: View {
 
 // MARK: - 현재 앨범
 
-/// 지금 재생 중인 곡의 앨범 목차. 곡이 다른 앨범으로 바뀌면 자동으로 다시 받아온다.
+/// 지금 재생 중인 곡의 앨범 목차. 플레이어가 라이브러리 → 카탈로그 순으로 찾아서 보내준다.
+/// 곡이 다른 앨범으로 바뀌면 자동으로 다시 받아온다.
 private struct CurrentAlbumView: View {
     @ObservedObject var app: AppModel
     @ObservedObject var net: MultipeerService
     let searchText: String
 
-    private var albumID: String? { app.nowPlaying?.albumID }
+    private let request = LibraryRequest(category: .albums, current: true)
+
+    private var hasTrack: Bool {
+        guard let np = app.nowPlaying else { return false }
+        return !np.title.isEmpty && np.title != "재생 중인 곡 없음"
+    }
 
     var body: some View {
-        if !net.isConnected && app.nowPlaying == nil {
-            LibraryPlaceholder(icon: "ipad", text: "아이패드(플레이어) 연결을 기다리는 중")
-        } else if let albumID, let np = app.nowPlaying {
-            let request = LibraryRequest(category: .albums, collectionID: albumID)
-            let hasItems = !(app.libraryLists[request]?.items.isEmpty ?? true)
-            VStack(spacing: 0) {
-                CollectionHeader(app: app, title: np.album.isEmpty ? "알 수 없는 앨범" : np.album,
-                                 subtitle: (np.albumArtist?.isEmpty == false ? np.albumArtist : nil) ?? np.artist,
-                                 enabled: net.isConnected && hasItems) { shuffle in
-                    app.playLibrary(PlayLibraryRequest(category: .albums, collectionID: albumID, shuffle: shuffle),
-                                    showNowPlaying: false)
-                }
-                LibraryLoadState(app: app, net: net, request: request) { list in
-                    TrackList(app: app, items: list.items, searchText: searchText, showNumbers: true,
-                              totalCount: list.totalCount) { item in
-                        // 목차를 보면서 곡을 고르는 화면이라 탭을 바꾸지 않고 현재 곡 표시만 갱신
-                        app.playLibrary(PlayLibraryRequest(category: .albums, collectionID: albumID,
-                                                           itemID: item.id),
+        Group {
+            if !net.isConnected && app.libraryLists[request] == nil {
+                LibraryPlaceholder(icon: "ipad", text: "아이패드(플레이어) 연결을 기다리는 중")
+            } else if !hasTrack {
+                LibraryPlaceholder(icon: "square.stack", text: "재생 중인 곡이 없습니다.")
+            } else {
+                let list = app.libraryLists[request]
+                let np = app.nowPlaying
+                let collectionID = list?.collectionID
+                VStack(spacing: 0) {
+                    CollectionHeader(app: app,
+                                     title: list?.collectionTitle ?? np?.album ?? "",
+                                     subtitle: list?.collectionSubtitle ?? np?.albumArtist ?? np?.artist,
+                                     enabled: net.isConnected && collectionID != nil && !(list?.items.isEmpty ?? true)) { shuffle in
+                        guard let collectionID else { return }
+                        app.playLibrary(PlayLibraryRequest(category: .albums, collectionID: collectionID, shuffle: shuffle),
                                         showNowPlaying: false)
+                    }
+                    LibraryLoadState(app: app, net: net, request: request) { list in
+                        TrackList(app: app, items: list.items, searchText: searchText, showNumbers: true,
+                                  totalCount: list.totalCount) { item in
+                            guard let cid = list.collectionID else { return }
+                            // 목차를 보면서 곡을 고르는 화면이라 탭을 바꾸지 않고 현재 곡 표시만 갱신
+                            app.playLibrary(PlayLibraryRequest(category: .albums, collectionID: cid, itemID: item.id),
+                                            showNowPlaying: false)
+                        }
                     }
                 }
             }
-        } else {
-            LibraryPlaceholder(icon: "square.stack",
-                               text: "재생 중인 앨범이 없습니다.\n아이패드에서 라이브러리에 있는 곡을 재생하면 앨범 목차가 표시됩니다.")
         }
+        .onAppear { refreshIfAlbumChanged() }
+        .onChange(of: app.currentAlbumKey) { _, _ in refreshIfAlbumChanged() }
+        .onChange(of: net.isConnected) { _, connected in
+            if connected { app.fetchedAlbumKey = nil; refreshIfAlbumChanged() }
+        }
+    }
+
+    /// 앨범이 바뀌었을 때만 새로 요청 (같은 앨범 안에서 곡이 바뀌면 강조 표시만 갱신)
+    private func refreshIfAlbumChanged() {
+        guard net.isConnected, hasTrack, let key = app.currentAlbumKey,
+              app.fetchedAlbumKey != key else { return }
+        app.fetchedAlbumKey = key
+        app.requestCurrent(.albums)
     }
 }
 
@@ -315,6 +401,17 @@ private struct TrackList: View {
         }
     }
 
+    /// 현재 곡: 라이브러리 ID → 카탈로그 ID → 제목 순으로 찾는다.
+    private var currentID: String? {
+        guard let np = app.nowPlaying else { return nil }
+        if let id = np.itemID, items.contains(where: { $0.id == id }) { return id }
+        if let sid = np.storeID {
+            let id = MusicLibraryProvider.storePrefix + sid
+            if items.contains(where: { $0.id == id }) { return id }
+        }
+        return items.first { $0.title == np.title }?.id
+    }
+
     private func leading(for item: LibraryItem, index: Int, current: Bool) -> LibraryRow.Leading {
         if showNumbers { return current ? .playing : .number(item.number ?? index + 1) }
         return .icon(current ? "speaker.wave.2.fill" : "music.note")
@@ -327,7 +424,7 @@ private struct TrackList: View {
             ScrollViewReader { proxy in
                 List {
                     ForEach(Array(filtered.enumerated()), id: \.element.id) { index, item in
-                        let current = item.id == app.nowPlaying?.itemID
+                        let current = item.id == currentID
                         Button { onSelect(item) } label: {
                             LibraryRow(title: item.title, subtitle: item.subtitle, duration: item.duration,
                                        leading: leading(for: item, index: index, current: current),
@@ -345,7 +442,7 @@ private struct TrackList: View {
                 .listStyle(.plain)
                 // 현재 곡이 보이도록 스크롤
                 .onAppear {
-                    if let id = app.nowPlaying?.itemID { proxy.scrollTo(id, anchor: .center) }
+                    if let id = currentID { proxy.scrollTo(id, anchor: .center) }
                 }
             }
         }

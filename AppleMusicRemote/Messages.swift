@@ -43,10 +43,14 @@ enum LibraryCategory: String, Codable, CaseIterable, Identifiable {
     }
 }
 
-/// 리모컨 → 플레이어: 목록 요청. collectionID 가 있으면 그 플레이리스트/앨범의 수록곡을 요청.
+/// 리모컨 → 플레이어: 목록 요청.
+/// - collectionID 있음: 그 플레이리스트/앨범의 수록곡
+/// - current == true: 지금 재생 중인 곡의 앨범 / 재생 중인 플레이리스트의 수록곡(플레이어가 찾아서 응답)
+/// - 둘 다 없음 + playlists: 전체 플레이리스트 트리
 struct LibraryRequest: Codable, Hashable {
     var category: LibraryCategory
     var collectionID: String? = nil
+    var current: Bool? = nil
 }
 
 /// 리모컨 → 플레이어: 재생 요청.
@@ -76,6 +80,10 @@ struct LibraryListMessage: Codable, Equatable {
     var items: [LibraryItem]
     var totalCount: Int          // 잘리기 전 전체 개수
     var error: String? = nil     // 권한 없음 등
+    /// current 요청일 때 플레이어가 찾아낸 앨범/플레이리스트 (재생 요청에 이 ID 를 쓴다)
+    var collectionID: String? = nil
+    var collectionTitle: String? = nil
+    var collectionSubtitle: String? = nil
 }
 
 /// 플레이어(아이패드) → 리모컨(아이폰) 으로 보내는 현재 재생 상태
@@ -99,6 +107,8 @@ struct NowPlayingMessage: Codable, Equatable {
     /// 라이브러리 곡일 때 현재 곡 / 앨범의 persistentID (라이브러리 탭에서 앨범 목차·현재 곡 표시용)
     var itemID: String? = nil
     var albumID: String? = nil
+    /// Apple Music 카탈로그 곡 ID (스트리밍 곡의 앨범 목차에서 현재 곡 표시용)
+    var storeID: String? = nil
 }
 
 /// MusicKit(우선) 또는 iTunes 검색으로 얻은 카탈로그 상세 정보 — 화면에 표시용

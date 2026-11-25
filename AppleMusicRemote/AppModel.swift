@@ -65,6 +65,15 @@ final class AppModel: ObservableObject {
     @Published var libraryLists: [LibraryRequest: LibraryListMessage] = [:]
     /// 리모컨: 응답을 기다리는 요청
     @Published var libraryLoading: Set<LibraryRequest> = []
+    /// 리모컨: 현재 앨범 목차를 마지막으로 요청한 앨범 키 (앨범이 바뀔 때만 다시 요청)
+    var fetchedAlbumKey: String?
+
+    /// 현재 곡의 앨범 식별 키(앨범명 + 앨범 아티스트)
+    var currentAlbumKey: String? {
+        guard let np = nowPlaying, !np.title.isEmpty else { return nil }
+        let artist = (np.albumArtist?.isEmpty == false ? np.albumArtist : nil) ?? np.artist
+        return "\(np.album)|\(artist)".lowercased()
+    }
 
     let multipeer = MultipeerService()
     let music = MusicController()
@@ -157,6 +166,7 @@ final class AppModel: ObservableObject {
 
     private func wire() {
         // 리모컨 명령 수신 → 플레이어가 실행
+        library.nowPlayingHint = { [weak self] in self?.music.current }
         multipeer.onCommand = { [weak self] cmd in
             self?.handle(cmd)
         }
@@ -179,6 +189,12 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.libraryLists[list.request] = list
             self.libraryLoading.remove(list.request)
+            // '현재' 요청의 결과는 찾아낸 컬렉션 ID 로도 캐시해 상세 화면이 바로 쓰게 한다.
+            if list.request.current == true, let cid = list.collectionID, list.error == nil {
+                var concrete = list
+                concrete.request = LibraryRequest(category: list.request.category, collectionID: cid)
+                self.libraryLists[concrete.request] = concrete
+            }
         }
         // 플레이어 곡정보 변동 → 메타데이터/모드 보강 후 전송 + 포인트 컬러 갱신
         music.onNowPlayingChanged = { [weak self] np in
@@ -233,6 +249,7 @@ final class AppModel: ObservableObject {
         playback = nil
         libraryLists.removeAll()
         libraryLoading.removeAll()
+        fetchedAlbumKey = nil
         remoteTab = .nowPlaying
         role = .unset
     }
@@ -270,6 +287,14 @@ final class AppModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
             self?.libraryLoading.remove(request)
         }
+    }
+
+    /// '현재 앨범' / '현재 플레이리스트' 를 이전 결과를 지우고 새로 요청한다.
+    func requestCurrent(_ category: LibraryCategory) {
+        let req = LibraryRequest(category: category, current: true)
+        libraryLists[req] = nil
+        libraryLoading.remove(req)
+        requestLibrary(req, force: true)
     }
 
     /// 라이브러리 항목을 아이패드에서 재생하고 Now Playing 탭으로 돌아간다.
@@ -394,6 +419,7 @@ final class AppModel: ObservableObject {
             if (item.title ?? "") == msg.title {
                 if item.persistentID != 0 { r.itemID = String(item.persistentID) }
                 if item.albumPersistentID != 0 { r.albumID = String(item.albumPersistentID) }
+                if !item.playbackStoreID.isEmpty, item.playbackStoreID != "0" { r.storeID = item.playbackStoreID }
             }
         }
         r.repeatMode = Self.repeatCode(sp.repeatMode)
