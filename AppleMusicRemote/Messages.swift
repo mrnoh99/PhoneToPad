@@ -31,8 +31,7 @@ struct CommandMessage: Codable {
 /// 라이브러리 목록 분류
 enum LibraryCategory: String, Codable, CaseIterable, Identifiable {
     case playlists
-    case albums
-    case songs
+    case albums      // 현재 재생 중인 곡의 앨범 수록곡
 
     var id: String { rawValue }
 
@@ -40,7 +39,6 @@ enum LibraryCategory: String, Codable, CaseIterable, Identifiable {
         switch self {
         case .playlists: return "플레이리스트"
         case .albums:    return "앨범"
-        case .songs:     return "노래"
         }
     }
 }
@@ -52,8 +50,7 @@ struct LibraryRequest: Codable, Hashable {
 }
 
 /// 리모컨 → 플레이어: 재생 요청.
-/// - collectionID 있음: 그 플레이리스트/앨범을 큐로(itemID 가 있으면 그 곡부터)
-/// - collectionID 없음 + songs: 전체 노래를 큐로 하고 itemID 곡부터
+/// collectionID 의 플레이리스트/앨범을 큐로 하고, itemID 가 있으면 그 곡부터 재생.
 struct PlayLibraryRequest: Codable, Equatable {
     var category: LibraryCategory
     var collectionID: String? = nil
@@ -68,6 +65,9 @@ struct LibraryItem: Codable, Equatable, Identifiable, Hashable {
     var subtitle: String? = nil  // 아티스트 / 곡 수 등
     var duration: Double? = nil  // 노래일 때 길이(초)
     var count: Int? = nil        // 플레이리스트/앨범일 때 곡 수
+    var number: Int? = nil       // 앨범 수록곡일 때 트랙 번호
+    var isFolder: Bool? = nil    // 플레이리스트 폴더 여부
+    var parentID: String? = nil  // 상위 플레이리스트 폴더 ID (최상위면 nil)
 }
 
 /// 플레이어 → 리모컨: 목록 응답
@@ -96,6 +96,9 @@ struct NowPlayingMessage: Codable, Equatable {
     var lyrics: String? = nil
     /// MusicKit/iTunes 카탈로그에서 받아온 상세 정보
     var catalog: CatalogInfo? = nil
+    /// 라이브러리 곡일 때 현재 곡 / 앨범의 persistentID (라이브러리 탭에서 앨범 목차·현재 곡 표시용)
+    var itemID: String? = nil
+    var albumID: String? = nil
 }
 
 /// MusicKit(우선) 또는 iTunes 검색으로 얻은 카탈로그 상세 정보 — 화면에 표시용

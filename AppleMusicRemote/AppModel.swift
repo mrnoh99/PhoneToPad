@@ -273,9 +273,9 @@ final class AppModel: ObservableObject {
     }
 
     /// 라이브러리 항목을 아이패드에서 재생하고 Now Playing 탭으로 돌아간다.
-    func playLibrary(_ request: PlayLibraryRequest) {
+    func playLibrary(_ request: PlayLibraryRequest, showNowPlaying: Bool = true) {
         multipeer.send(Packet(command: CommandMessage(command: .playLibrary, play: request)))
-        withAnimation { remoteTab = .nowPlaying }
+        if showNowPlaying { withAnimation { remoteTab = .nowPlaying } }
     }
 
     // MARK: - 플레이어 로컬 셔플/반복 토글 (PlayerView 용)
@@ -390,6 +390,11 @@ final class AppModel: ObservableObject {
                 r.releaseDate = Self.releaseYearFormatter.string(from: date)
             }
             if let ly = item.lyrics, !ly.isEmpty { r.lyrics = ly }   // 내장 가사(있을 때만)
+            // 같은 곡일 때만 라이브러리 ID 를 싣는다(Classical 등 다른 앱 재생 시 오표시 방지)
+            if (item.title ?? "") == msg.title {
+                if item.persistentID != 0 { r.itemID = String(item.persistentID) }
+                if item.albumPersistentID != 0 { r.albumID = String(item.albumPersistentID) }
+            }
         }
         r.repeatMode = Self.repeatCode(sp.repeatMode)
         r.shuffleMode = (sp.shuffleMode == .off) ? 0 : 1

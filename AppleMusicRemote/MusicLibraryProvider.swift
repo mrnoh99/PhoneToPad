@@ -35,28 +35,17 @@ final class MusicLibraryProvider {
     private func buildList(_ request: LibraryRequest) -> LibraryListMessage {
         var all: [LibraryItem]
         if let cid = request.collectionID {
-            all = (collectionItems(category: request.category, id: cid) ?? []).map(songItem)
+            let withNumbers = request.category == .albums
+            all = (collectionItems(category: request.category, id: cid) ?? []).map {
+                songItem($0, inAlbum: withNumbers)
+            }
         } else {
             switch request.category {
             case .playlists:
-                all = (MPMediaQuery.playlists().collections ?? []).compactMap { c in
-                    guard let pl = c as? MPMediaPlaylist else { return nil }
-                    return LibraryItem(id: String(pl.persistentID),
-                                       title: pl.name ?? "이름 없는 플레이리스트",
-                                       subtitle: "\(pl.count)곡",
-                                       count: pl.count)
-                }
+                all = playlistTree()
             case .albums:
-                all = (MPMediaQuery.albums().collections ?? []).compactMap { c in
-                    guard let rep = c.representativeItem else { return nil }
-                    let artist = rep.albumArtist ?? rep.artist ?? ""
-                    return LibraryItem(id: String(rep.albumPersistentID),
-                                       title: rep.albumTitle ?? "알 수 없는 앨범",
-                                       subtitle: artist.isEmpty ? "\(c.count)곡" : "\(artist) · \(c.count)곡",
-                                       count: c.count)
-                }
-            case .songs:
-                all = (MPMediaQuery.songs().items ?? []).map(songItem)
+                // 앨범은 항상 collectionID(현재 곡의 앨범 ID)로 요청한다.
+                all = []
             }
         }
         let total = all.count
@@ -64,14 +53,35 @@ final class MusicLibraryProvider {
         return LibraryListMessage(request: request, items: all, totalCount: total)
     }
 
-    private func songItem(_ item: MPMediaItem) -> LibraryItem {
+    /// 전체 플레이리스트 + 폴더. Apple Music 의 폴더 구조(parentID)를 그대로 싣는다.
+    /// 폴더/상위 정보는 공개 상수가 없어 MPMediaPlaylist 의 "isFolder" / "parentPersistentID" 속성을 읽는다.
+    private func playlistTree() -> [LibraryItem] {
+        let playlists = (MPMediaQuery.playlists().collections ?? []).compactMap { $0 as? MPMediaPlaylist }
+        return playlists.map { pl in
+            let isFolder = (pl.value(forProperty: "isFolder") as? NSNumber)?.boolValue ?? false
+            let parent = (pl.value(forProperty: "parentPersistentID") as? NSNumber)?.uint64Value ?? 0
+            return LibraryItem(id: String(pl.persistentID),
+                               title: pl.name ?? (isFolder ? "이름 없는 폴더" : "이름 없는 플레이리스트"),
+                               subtitle: isFolder ? nil : "\(pl.count)곡",
+                               count: pl.count,
+                               isFolder: isFolder ? true : nil,
+                               parentID: parent != 0 ? String(parent) : nil)
+        }
+    }
+
+    private func songItem(_ item: MPMediaItem, inAlbum: Bool) -> LibraryItem {
         let artist = item.artist ?? ""
-        let album = item.albumTitle ?? ""
-        let sub = [artist, album].filter { !$0.isEmpty }.joined(separator: " · ")
+        let sub: String
+        if inAlbum {
+            sub = artist
+        } else {
+            sub = [artist, item.albumTitle ?? ""].filter { !$0.isEmpty }.joined(separator: " · ")
+        }
         return LibraryItem(id: String(item.persistentID),
                            title: item.title ?? "알 수 없는 곡",
                            subtitle: sub.isEmpty ? nil : sub,
-                           duration: item.playbackDuration > 0 ? item.playbackDuration : nil)
+                           duration: item.playbackDuration > 0 ? item.playbackDuration : nil,
+                           number: inAlbum && item.albumTrackNumber > 0 ? item.albumTrackNumber : nil)
     }
 
     /// 플레이리스트/앨범의 수록곡
@@ -91,8 +101,6 @@ final class MusicLibraryProvider {
             return (q.items ?? []).sorted {
                 ($0.discNumber, $0.albumTrackNumber) < ($1.discNumber, $1.albumTrackNumber)
             }
-        case .songs:
-            return nil
         }
     }
 
@@ -101,16 +109,10 @@ final class MusicLibraryProvider {
     /// 메인 스레드에서 호출. 큐를 바꾸고 재생을 시작한다. 성공 여부 반환.
     @discardableResult
     func play(_ request: PlayLibraryRequest) -> Bool {
-        guard MPMediaLibrary.authorizationStatus() == .authorized else { return false }
+        guard MPMediaLibrary.authorizationStatus() == .authorized,
+              let cid = request.collectionID else { return false }
 
-        let items: [MPMediaItem]
-        if let cid = request.collectionID {
-            items = collectionItems(category: request.category, id: cid) ?? []
-        } else if request.category == .songs {
-            items = MPMediaQuery.songs().items ?? []
-        } else {
-            items = []
-        }
+        let items = collectionItems(category: request.category, id: cid) ?? []
         guard !items.isEmpty else { return false }
 
         let start = request.itemID.flatMap { id in items.first { String($0.persistentID) == id } }
