@@ -287,6 +287,7 @@ final class MusicLibraryProvider {
         var collectionID: String
         var title: String
         var artist: String
+        var artworkURL: String?
         var tracks: [ITunesItem]
     }
 
@@ -306,7 +307,9 @@ final class MusicLibraryProvider {
         let cid = Self.storePrefix + r.collectionID
         let ids = r.tracks.compactMap { $0.trackId.map(String.init) }
         DispatchQueue.main.async { self.catalogAlbumTracks[cid] = ids }
-        return message(request, items, collectionID: cid, title: r.title, subtitle: r.artist, detail: trace?.text)
+        var msg = message(request, items, collectionID: cid, title: r.title, subtitle: r.artist, detail: trace?.text)
+        msg.collectionArtworkURL = r.artworkURL
+        return msg
     }
 
     /// 현재 곡의 카탈로그 앨범을 찾는다: store ID 직접 조회 → 실패하면 제목/아티스트 검색.
@@ -356,6 +359,8 @@ final class MusicLibraryProvider {
         return CatalogAlbum(collectionID: collectionID,
                             title: header?.collectionName ?? tracks.first?.collectionName ?? "",
                             artist: header?.artistName ?? tracks.first?.artistName ?? "",
+                            artworkURL: (header?.artworkUrl100 ?? tracks.first?.artworkUrl100)
+                                .map { $0.replacingOccurrences(of: "100x100", with: "1200x1200") },
                             tracks: tracks)
     }
 
@@ -417,11 +422,21 @@ final class MusicLibraryProvider {
         let trackNumber: Int?
         let discNumber: Int?
         let trackTimeMillis: Int?
+        let artworkUrl100: String?
     }
 
     // MARK: - 재생
 
+    /// 실제 재생이 시작된 뒤 호출(곡 정보 재전송용)
+    var onPlaybackStarted: (() -> Void)?
+    /// 연속 탭 시 이전 재생 요청의 완료 처리를 무시하기 위한 세대 번호
+    private var playGeneration = 0
+
     /// 메인 스레드에서 호출. 큐를 바꾸고 재생을 시작한다. 성공 여부 반환.
+    ///
+    /// systemMusicPlayer 는 setQueue 직후의 `nowPlayingItem` 지정이나 `startItemID` 를 무시하고 첫 곡부터
+    /// 재생하는 경우가 있다. 그래서 시작 곡을 큐 디스크립터에 넣고 `prepareToPlay` 완료를 기다린 뒤,
+    /// 실제로 고른 곡이 준비됐는지 확인하고 아니면 보정한 다음 재생한다.
     @discardableResult
     func play(_ request: PlayLibraryRequest) -> Bool {
         guard MPMediaLibrary.authorizationStatus() == .authorized,
@@ -435,12 +450,22 @@ final class MusicLibraryProvider {
         if cid.hasPrefix(Self.storePrefix) {
             guard let ids = catalogAlbumTracks[cid], !ids.isEmpty else { return false }
             lastPlayedPlaylistID = nil
-            let descriptor = MPMusicPlayerStoreQueueDescriptor(storeIDs: ids)
-            if let item = request.itemID, item.hasPrefix(Self.storePrefix) {
-                descriptor.startItemID = String(item.dropFirst(Self.storePrefix.count))
+            let target = request.itemID.flatMap { id -> String? in
+                id.hasPrefix(Self.storePrefix) ? String(id.dropFirst(Self.storePrefix.count)) : nil
             }
+            let descriptor = MPMusicPlayerStoreQueueDescriptor(storeIDs: ids)
+            if let target { descriptor.startItemID = target }
             player.setQueue(with: descriptor)
-            player.play()
+            startPlayback(
+                isCorrect: { [weak self] in
+                    guard let target else { return true }
+                    return self?.player.nowPlayingItem?.playbackStoreID == target
+                },
+                fix: { [weak self] in
+                    // 시작 곡 지정이 무시되면 고른 곡부터 끝까지를 큐로 다시 지정한다.
+                    guard let self, let target, let idx = ids.firstIndex(of: target) else { return }
+                    self.player.setQueue(with: MPMusicPlayerStoreQueueDescriptor(storeIDs: Array(ids[idx...])))
+                })
             return true
         }
 
@@ -450,9 +475,43 @@ final class MusicLibraryProvider {
         lastPlayedPlaylistID = request.category == .playlists ? UInt64(cid) : nil
 
         let start = request.itemID.flatMap { id in items.first { String($0.persistentID) == id } }
-        player.setQueue(with: MPMediaItemCollection(items: items))
-        if let start { player.nowPlayingItem = start }
-        player.play()
+        let descriptor = MPMusicPlayerMediaItemQueueDescriptor(itemCollection: MPMediaItemCollection(items: items))
+        if let start { descriptor.startItem = start }
+        player.setQueue(with: descriptor)
+        startPlayback(
+            isCorrect: { [weak self] in
+                guard let start else { return true }
+                return self?.player.nowPlayingItem?.persistentID == start.persistentID
+            },
+            fix: { [weak self] in
+                if let start { self?.player.nowPlayingItem = start }
+            })
         return true
+    }
+
+    /// prepareToPlay 완료 후 시작 곡을 확인·보정하고 재생한다.
+    private func startPlayback(isCorrect: @escaping () -> Bool, fix: @escaping () -> Void) {
+        playGeneration += 1
+        let generation = playGeneration
+        let finish: () -> Void = { [weak self] in
+            guard let self, generation == self.playGeneration else { return }
+            let wasWrong = !isCorrect()
+            if wasWrong { fix() }
+            self.player.play()
+            self.onPlaybackStarted?()
+            // 보정이 필요했던 경우에만, 반영이 늦을 수 있어 한 번 더 확인 (사용자의 다음곡 조작을 되돌리지 않도록)
+            guard wasWrong else { return }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { [weak self] in
+                guard let self, generation == self.playGeneration else { return }
+                if !isCorrect() {
+                    fix()
+                    self.player.play()
+                    self.onPlaybackStarted?()
+                }
+            }
+        }
+        player.prepareToPlay { _ in
+            DispatchQueue.main.async { finish() }
+        }
     }
 }

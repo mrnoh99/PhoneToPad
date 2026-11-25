@@ -180,6 +180,11 @@ final class AppModel: ObservableObject {
     private func wire() {
         // 리모컨 명령 수신 → 플레이어가 실행
         library.nowPlayingHint = { [weak self] in self?.music.current }
+        // 라이브러리 재생이 실제로 시작되면(시작 곡 보정 포함) 곡 정보·진행 위치를 다시 보낸다.
+        library.onPlaybackStarted = { [weak self] in
+            self?.music.publishBurst(force: true)
+            self?.sendPosition()
+        }
         multipeer.onCommand = { [weak self] cmd in
             self?.handle(cmd)
         }

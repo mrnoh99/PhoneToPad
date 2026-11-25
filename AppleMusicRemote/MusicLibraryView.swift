@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 
 /// 리모컨 모드의 최상위 화면: [Now Playing] / [라이브러리] 두 탭.
 struct RemoteRootView: View {
@@ -279,7 +280,7 @@ struct LibraryCollectionView: View {
     var body: some View {
         VStack(spacing: 0) {
             CollectionHeader(app: app, title: ref.title, subtitle: ref.subtitle,
-                             enabled: net.isConnected && hasItems) { shuffle in
+                             enabled: net.isConnected && hasItems, onShowArt: nil) { shuffle in
                 app.playLibrary(PlayLibraryRequest(category: ref.category, collectionID: ref.id, shuffle: shuffle))
             }
             LibraryLoadState(app: app, net: net, request: request) { list in
@@ -306,6 +307,7 @@ private struct CurrentAlbumView: View {
     @ObservedObject var app: AppModel
     @ObservedObject var net: MultipeerService
     let searchText: String
+    @State private var showArt = false
 
     private let request = LibraryRequest(category: .albums, current: true)
 
@@ -328,7 +330,8 @@ private struct CurrentAlbumView: View {
                     CollectionHeader(app: app,
                                      title: list?.collectionTitle ?? np?.album ?? "",
                                      subtitle: list?.collectionSubtitle ?? np?.albumArtist ?? np?.artist,
-                                     enabled: net.isConnected && collectionID != nil && !(list?.items.isEmpty ?? true)) { shuffle in
+                                     enabled: net.isConnected && collectionID != nil && !(list?.items.isEmpty ?? true),
+                                     onShowArt: { showArt = true }) { shuffle in
                         guard let collectionID else { return }
                         app.playLibrary(PlayLibraryRequest(category: .albums, collectionID: collectionID, shuffle: shuffle),
                                         showNowPlaying: false)
@@ -344,6 +347,13 @@ private struct CurrentAlbumView: View {
                     }
                 }
             }
+        }
+        .sheet(isPresented: $showArt) {
+            let list = app.libraryLists[request]
+            AlbumArtSheet(title: list?.collectionTitle ?? app.nowPlaying?.album ?? "",
+                          subtitle: list?.collectionSubtitle ?? app.nowPlaying?.albumArtist ?? app.nowPlaying?.artist,
+                          artworkURL: list?.collectionArtworkURL.flatMap(URL.init(string:)),
+                          fallbackJPEG: app.nowPlaying?.artworkJPEG)
         }
         .onAppear { refreshIfAlbumChanged() }
         .onChange(of: app.currentAlbumKey) { _, _ in refreshIfAlbumChanged() }
@@ -484,6 +494,8 @@ private struct CollectionHeader: View {
     let title: String
     let subtitle: String?
     let enabled: Bool
+    /// 있으면 앨범아트 보기 버튼을 표시
+    var onShowArt: (() -> Void)? = nil
     let onPlay: (_ shuffle: Bool) -> Void
 
     var body: some View {
@@ -498,6 +510,18 @@ private struct CollectionHeader: View {
             HStack(spacing: 12) {
                 button("재생", icon: "play.fill", shuffle: false)
                 button("셔플", icon: "shuffle", shuffle: true)
+                if let onShowArt {
+                    Button(action: onShowArt) {
+                        Image(systemName: "photo")
+                            .font(.callout.weight(.semibold))
+                            .frame(width: 48)
+                            .padding(.vertical, 10)
+                            .foregroundStyle(app.accent)
+                            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                    .accessibilityLabel("앨범아트 보기")
+                }
             }
             .padding(.top, 8)
         }
@@ -629,6 +653,84 @@ private struct LibraryRow: View {
                 .font(.system(size: 14))
                 .foregroundStyle(highlight ?? .white)
                 .frame(width: 28, alignment: .trailing)
+        }
+    }
+}
+
+/// 앨범아트 크게 보기. 카탈로그 고해상도 이미지가 있으면 받아서 보여주고, 그동안/없으면 현재 곡 아트를 표시.
+private struct AlbumArtSheet: View {
+    let title: String
+    let subtitle: String?
+    let artworkURL: URL?
+    let fallbackJPEG: Data?
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var fallback: UIImage?
+
+    var body: some View {
+        ZStack {
+            Color.black.ignoresSafeArea()
+            VStack(spacing: 16) {
+                Spacer(minLength: 0)
+                artwork
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .shadow(color: .black.opacity(0.6), radius: 20, y: 8)
+                    .padding(.horizontal, 20)
+                VStack(spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                        .foregroundStyle(.white)
+                        .multilineTextAlignment(.center)
+                    if let s = subtitle, !s.isEmpty {
+                        Text(s).font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    }
+                }
+                .padding(.horizontal, 24)
+                Spacer(minLength: 0)
+            }
+        }
+        .overlay(alignment: .topTrailing) {
+            Button { dismiss() } label: {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 28))
+                    .symbolRenderingMode(.hierarchical)
+                    .foregroundStyle(.white)
+            }
+            .padding(16)
+            .accessibilityLabel("닫기")
+        }
+        .contentShape(Rectangle())
+        .onTapGesture { dismiss() }
+        .preferredColorScheme(.dark)
+        .task {
+            let data = fallbackJPEG
+            fallback = await Task.detached { data.flatMap { UIImage(data: $0) } }.value
+        }
+    }
+
+    @ViewBuilder private var artwork: some View {
+        if let artworkURL {
+            AsyncImage(url: artworkURL) { phase in
+                if let image = phase.image {
+                    image.resizable().scaledToFit()
+                } else {
+                    fallbackView
+                }
+            }
+        } else {
+            fallbackView
+        }
+    }
+
+    @ViewBuilder private var fallbackView: some View {
+        if let fallback {
+            Image(uiImage: fallback).resizable().scaledToFit()
+        } else {
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.white.opacity(0.06))
+                .aspectRatio(1, contentMode: .fit)
+                .overlay(Image(systemName: "music.note").font(.system(size: 60, weight: .thin))
+                    .foregroundStyle(.secondary))
         }
     }
 }
