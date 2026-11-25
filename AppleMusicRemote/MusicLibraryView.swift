@@ -78,11 +78,12 @@ struct MusicLibraryView: View {
             guard waitingCurrentPlaylist, let list else { return }
             waitingCurrentPlaylist = false
             if let cid = list.collectionID, list.error == nil {
-                var newPath = NavigationPath()
-                newPath.append(LibraryCollectionRef(category: .playlists, id: cid,
-                                                    title: list.collectionTitle ?? "플레이리스트",
-                                                    subtitle: list.collectionSubtitle))
-                path = newPath
+                openPlaylist(LibraryCollectionRef(category: .playlists, id: cid,
+                                                  title: list.collectionTitle ?? "플레이리스트",
+                                                  subtitle: list.collectionSubtitle))
+            } else if let last = app.lastOpenedPlaylist {
+                // 지금 재생 중인 플레이리스트가 없으면(예: 앨범으로 넘어가 듣는 중) 가장 최근에 연 플레이리스트로
+                openPlaylist(last)
             } else {
                 currentPlaylistError = list.error ?? "재생 중인 플레이리스트를 찾지 못했습니다."
             }
@@ -112,8 +113,16 @@ struct MusicLibraryView: View {
                 } else {
                     Image(systemName: "waveform")
                 }
-                Text("현재 재생 중인 플레이리스트")
-                    .font(.callout.weight(.semibold))
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("현재 재생 중인 플레이리스트")
+                        .font(.callout.weight(.semibold))
+                    if let last = app.lastOpenedPlaylist {
+                        Text("없으면 최근: \(last.title)")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                    }
+                }
                 Spacer(minLength: 0)
                 Image(systemName: "chevron.right").font(.caption.weight(.semibold))
             }
@@ -127,6 +136,12 @@ struct MusicLibraryView: View {
         .opacity(net.isConnected ? 1 : 0.4)
         .padding(.horizontal, 16)
         .padding(.bottom, 6)
+    }
+
+    private func openPlaylist(_ ref: LibraryCollectionRef) {
+        var newPath = NavigationPath()
+        newPath.append(ref)
+        path = newPath
     }
 
     private func refresh() {
@@ -153,7 +168,7 @@ struct PlaylistFolderRef: Hashable {
 }
 
 /// 플레이리스트 상세(수록곡)로 이동하기 위한 값
-struct LibraryCollectionRef: Hashable {
+struct LibraryCollectionRef: Hashable, Codable {
     var category: LibraryCategory
     var id: String
     var title: String
@@ -276,6 +291,9 @@ struct LibraryCollectionView: View {
             }
         }
         .navigationBarTitleDisplayMode(.inline)
+        .onAppear {
+            if ref.category == .playlists { app.lastOpenedPlaylist = ref }
+        }
         .searchable(text: $searchText, prompt: "곡 검색")
     }
 }

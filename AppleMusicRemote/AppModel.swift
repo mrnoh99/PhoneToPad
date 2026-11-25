@@ -65,6 +65,19 @@ final class AppModel: ObservableObject {
     @Published var libraryLists: [LibraryRequest: LibraryListMessage] = [:]
     /// 리모컨: 응답을 기다리는 요청
     @Published var libraryLoading: Set<LibraryRequest> = []
+    /// 리모컨: 가장 최근에 연 플레이리스트 (재생 중인 플레이리스트를 못 찾을 때 대신 연다)
+    @Published var lastOpenedPlaylist: LibraryCollectionRef? = {
+        guard let data = UserDefaults.standard.data(forKey: "lastOpenedPlaylist") else { return nil }
+        return try? JSONDecoder().decode(LibraryCollectionRef.self, from: data)
+    }() {
+        didSet {
+            if let ref = lastOpenedPlaylist, let data = try? JSONEncoder().encode(ref) {
+                UserDefaults.standard.set(data, forKey: "lastOpenedPlaylist")
+            } else {
+                UserDefaults.standard.removeObject(forKey: "lastOpenedPlaylist")
+            }
+        }
+    }
     /// 리모컨: 현재 앨범 목차를 마지막으로 요청한 앨범 키 (앨범이 바뀔 때만 다시 요청)
     var fetchedAlbumKey: String?
 

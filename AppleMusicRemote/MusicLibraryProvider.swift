@@ -277,7 +277,7 @@ final class MusicLibraryProvider {
            }) {
             return result(exact)
         }
-        if let first = candidates.first { return result(first) }
+        // 큐 위치가 맞지 않으면 추측하지 않는다(앨범 등 다른 곡을 듣는 중일 수 있음 → 리모컨이 최근 플레이리스트로 대체)
         return message(request, [], error: "현재 곡이 들어 있는 플레이리스트를 찾지 못했습니다.")
     }
 
@@ -434,6 +434,7 @@ final class MusicLibraryProvider {
         // 카탈로그(스트리밍) 앨범: store ID 큐로 재생
         if cid.hasPrefix(Self.storePrefix) {
             guard let ids = catalogAlbumTracks[cid], !ids.isEmpty else { return false }
+            lastPlayedPlaylistID = nil
             let descriptor = MPMusicPlayerStoreQueueDescriptor(storeIDs: ids)
             if let item = request.itemID, item.hasPrefix(Self.storePrefix) {
                 descriptor.startItemID = String(item.dropFirst(Self.storePrefix.count))
@@ -445,7 +446,8 @@ final class MusicLibraryProvider {
 
         let items = collectionItems(category: request.category, id: cid) ?? []
         guard !items.isEmpty else { return false }
-        if request.category == .playlists { lastPlayedPlaylistID = UInt64(cid) }
+        // 앨범을 재생하면 더 이상 플레이리스트 재생 중이 아니다
+        lastPlayedPlaylistID = request.category == .playlists ? UInt64(cid) : nil
 
         let start = request.itemID.flatMap { id in items.first { String($0.persistentID) == id } }
         player.setQueue(with: MPMediaItemCollection(items: items))
