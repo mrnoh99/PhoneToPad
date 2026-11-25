@@ -18,7 +18,7 @@ targets:
         INFOPLIST_FILE: AppleMusicRemote/Info.plist
         GENERATE_INFOPLIST_FILE: NO
         MARKETING_VERSION: "1.0"
-        CURRENT_PROJECT_VERSION: "2"
+        CURRENT_PROJECT_VERSION: "3"
         SWIFT_VERSION: "5.9"
         TARGETED_DEVICE_FAMILY: "1,2"   # 1=아이폰, 2=아이패드 (유니버설)
         SUPPORTS_MACCATALYST: YES        # Mac 플레이어(Tahoe) — osascript 곡 정보 조회
