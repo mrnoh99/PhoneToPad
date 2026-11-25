@@ -356,10 +356,21 @@ private struct LibraryLoadState<Content: View>: View {
     var body: some View {
         Group {
             if let list = app.libraryLists[request] {
-                if let err = list.error {
-                    LibraryPlaceholder(icon: "lock.fill", text: err)
-                } else {
-                    content(list)
+                VStack(spacing: 0) {
+                    if list.playerBuild != AppInfo.build {
+                        BuildMismatchBanner(playerBuild: list.playerBuild)
+                    }
+                    if let err = list.error {
+                        LibraryPlaceholder(icon: "exclamationmark.triangle", text: err, detail: list.detail) {
+                            app.requestLibrary(request, force: true)
+                        }
+                    } else if list.items.isEmpty, request.current == true || list.playerBuild == nil {
+                        LibraryPlaceholder(icon: "music.note", text: "목록이 비어 있습니다.", detail: list.detail) {
+                            app.requestLibrary(request, force: true)
+                        }
+                    } else {
+                        content(list)
+                    }
                 }
             } else if !net.isConnected {
                 LibraryPlaceholder(icon: "ipad", text: "아이패드(플레이어) 연결을 기다리는 중")
@@ -494,17 +505,56 @@ private struct CollectionHeader: View {
 private struct LibraryPlaceholder: View {
     let icon: String
     let text: String
+    /// 실패 원인 진단(플레이어가 보내온 단계별 기록)
+    var detail: String? = nil
+    var retry: (() -> Void)? = nil
 
     var body: some View {
-        VStack(spacing: 10) {
-            Image(systemName: icon).font(.system(size: 36, weight: .thin)).foregroundStyle(.secondary)
-            Text(text)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-                .multilineTextAlignment(.center)
+        ScrollView {
+            VStack(spacing: 10) {
+                Image(systemName: icon).font(.system(size: 36, weight: .thin)).foregroundStyle(.secondary)
+                Text(text)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                if let retry {
+                    Button("다시 시도", action: retry).font(.footnote)
+                }
+                if let d = detail, !d.isEmpty {
+                    Text(d)
+                        .font(.caption2.monospaced())
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(10)
+                        .background(Color.white.opacity(0.05), in: RoundedRectangle(cornerRadius: 8))
+                        .textSelection(.enabled)
+                        .padding(.top, 8)
+                }
+            }
+            .padding(32)
+            .frame(maxWidth: .infinity)
         }
-        .padding(32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+/// 플레이어(아이패드)와 리모컨의 build 가 다를 때 경고
+private struct BuildMismatchBanner: View {
+    let playerBuild: String?
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.yellow)
+            Text("아이패드 앱 build \(playerBuild ?? "3 이하") · 이 기기 build \(AppInfo.build)\n"
+                 + "두 기기 모두 같은 build 로 다시 설치해야 앨범 목차 등이 동작합니다.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 0)
+        }
+        .padding(10)
+        .background(Color.yellow.opacity(0.12), in: RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 6)
     }
 }
 

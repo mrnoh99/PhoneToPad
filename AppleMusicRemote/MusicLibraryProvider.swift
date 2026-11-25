@@ -28,7 +28,10 @@ final class MusicLibraryProvider {
 
     /// 메인 스레드에서 호출. 백그라운드에서 목록을 만들고 메인 스레드에서 completion 을 부른다.
     func list(_ request: LibraryRequest, completion: @escaping (LibraryListMessage) -> Void) {
+        let build = AppInfo.build
         let finish: (LibraryListMessage) -> Void = { msg in
+            var msg = msg
+            msg.playerBuild = build
             DispatchQueue.main.async { completion(msg) }
         }
         let status = MPMediaLibrary.authorizationStatus()
@@ -108,11 +111,19 @@ final class MusicLibraryProvider {
 
     private func message(_ request: LibraryRequest, _ items: [LibraryItem],
                          collectionID: String? = nil, title: String? = nil, subtitle: String? = nil,
-                         error: String? = nil) -> LibraryListMessage {
+                         error: String? = nil, detail: String? = nil) -> LibraryListMessage {
         let total = items.count
         let capped = items.count > Self.maxItems ? Array(items.prefix(Self.maxItems)) : items
         return LibraryListMessage(request: request, items: capped, totalCount: total, error: error,
-                                  collectionID: collectionID, collectionTitle: title, collectionSubtitle: subtitle)
+                                  collectionID: collectionID, collectionTitle: title, collectionSubtitle: subtitle,
+                                  detail: detail)
+    }
+
+    /// 진단 기록 (비동기 단계 사이에서 공유)
+    private final class Trace {
+        var lines: [String] = []
+        func add(_ s: String) { lines.append(s) }
+        var text: String { lines.joined(separator: "\n") }
     }
 
     /// 전체 플레이리스트 + 폴더. Apple Music 의 폴더 구조(parentID)를 그대로 싣는다.
@@ -180,15 +191,24 @@ final class MusicLibraryProvider {
 
     private func currentAlbum(_ request: LibraryRequest, _ s: CurrentSnapshot,
                               finish: @escaping (LibraryListMessage) -> Void) {
+        let trace = Trace()
         let albumArtist = s.item?.albumArtist ?? s.hint?.albumArtist ?? s.artist
+        trace.add("곡: \(s.title) / \(s.artist) / 앨범: \(s.album.isEmpty ? "(없음)" : s.album)")
+        if let item = s.item {
+            trace.add("시스템 플레이어 곡: id=\(item.persistentID) albumID=\(item.albumPersistentID) storeID=\(item.playbackStoreID.isEmpty ? "-" : item.playbackStoreID)")
+        } else {
+            trace.add("시스템 플레이어 곡: 없음 (Classical 등 다른 앱이거나 곡 정보 불일치)")
+        }
 
         // ① 라이브러리 앨범 ID
         if let item = s.item, item.albumPersistentID != 0 {
             let items = albumItems(predicate: MPMediaPropertyPredicate(
                 value: NSNumber(value: item.albumPersistentID), forProperty: MPMediaItemPropertyAlbumPersistentID))
+            trace.add("① 라이브러리 앨범 ID 조회: \(items.count)곡")
             if !items.isEmpty {
                 finish(message(request, items.map { songItem($0, inAlbum: true) },
-                               collectionID: String(item.albumPersistentID), title: s.album, subtitle: albumArtist))
+                               collectionID: String(item.albumPersistentID), title: s.album, subtitle: albumArtist,
+                               detail: trace.text))
                 return
             }
         }
@@ -201,13 +221,15 @@ final class MusicLibraryProvider {
                 let a = ($0.albumArtist ?? $0.artist ?? "").lowercased()
                 return !albumArtist.isEmpty && a == albumArtist.lowercased()
             }
+            trace.add("② 라이브러리 앨범 제목 조회: \(items.count)곡 (아티스트 일치 \(byArtist.count)곡)")
             if !byArtist.isEmpty { items = byArtist }
             if let first = items.first, first.albumPersistentID != 0 {
                 // 같은 앨범 ID 만 남긴다(같은 제목의 다른 앨범 섞임 방지)
                 let pid = first.albumPersistentID
                 let same = items.filter { $0.albumPersistentID == pid }
                 finish(message(request, same.map { songItem($0, inAlbum: true) },
-                               collectionID: String(pid), title: s.album, subtitle: albumArtist))
+                               collectionID: String(pid), title: s.album, subtitle: albumArtist,
+                               detail: trace.text))
                 return
             }
         }
@@ -216,13 +238,13 @@ final class MusicLibraryProvider {
         let storeID = s.item?.playbackStoreID ?? ""
         let title = s.title, artist = s.artist, album = s.album
         guard !title.isEmpty || !storeID.isEmpty else {
-            finish(message(request, [], error: "재생 중인 곡이 없습니다."))
+            finish(message(request, [], error: "재생 중인 곡이 없습니다.", detail: trace.text))
             return
         }
         Task { [weak self] in
             guard let self else { return }
-            let r = await self.catalogAlbum(storeID: storeID, title: title, artist: artist, album: album)
-            finish(self.catalogMessage(request, r))
+            let r = await self.catalogAlbum(storeID: storeID, title: title, artist: artist, album: album, trace: trace)
+            finish(self.catalogMessage(request, r, trace: trace))
         }
     }
 
@@ -268,9 +290,10 @@ final class MusicLibraryProvider {
         var tracks: [ITunesItem]
     }
 
-    private func catalogMessage(_ request: LibraryRequest, _ r: CatalogAlbum?) -> LibraryListMessage {
+    private func catalogMessage(_ request: LibraryRequest, _ r: CatalogAlbum?,
+                                trace: Trace? = nil) -> LibraryListMessage {
         guard let r, !r.tracks.isEmpty else {
-            return message(request, [], error: "이 곡의 앨범 목차를 찾지 못했습니다.")
+            return message(request, [], error: "이 곡의 앨범 목차를 찾지 못했습니다.", detail: trace?.text)
         }
         let items = r.tracks.compactMap { t -> LibraryItem? in
             guard let id = t.trackId else { return nil }
@@ -283,24 +306,36 @@ final class MusicLibraryProvider {
         let cid = Self.storePrefix + r.collectionID
         let ids = r.tracks.compactMap { $0.trackId.map(String.init) }
         DispatchQueue.main.async { self.catalogAlbumTracks[cid] = ids }
-        return message(request, items, collectionID: cid, title: r.title, subtitle: r.artist)
+        return message(request, items, collectionID: cid, title: r.title, subtitle: r.artist, detail: trace?.text)
     }
 
     /// 현재 곡의 카탈로그 앨범을 찾는다: store ID 직접 조회 → 실패하면 제목/아티스트 검색.
-    private func catalogAlbum(storeID: String, title: String, artist: String, album: String) async -> CatalogAlbum? {
+    private func catalogAlbum(storeID: String, title: String, artist: String, album: String,
+                              trace: Trace) async -> CatalogAlbum? {
         var collectionID: Int?
-        if !storeID.isEmpty, storeID != "0",
-           let r = await lookup(["id": storeID]), let t = r.first(where: { $0.collectionId != nil }) {
-            collectionID = t.collectionId
+        if !storeID.isEmpty, storeID != "0" {
+            let r = await lookup(["id": storeID])
+            collectionID = r?.first(where: { $0.collectionId != nil })?.collectionId
+            trace.add("③ 카탈로그 store ID 조회: " + (r == nil ? "요청 실패(인터넷 연결 확인)"
+                                                    : "\(r!.count)건, 앨범 ID \(collectionID.map(String.init) ?? "없음")"))
         }
         if collectionID == nil {
-            let term = [artist, title].filter { !$0.isEmpty }.joined(separator: " ")
-            if let results = await search(term: term) {
-                collectionID = bestMatch(results, title: title, artist: artist, album: album)?.collectionId
+            // 아티스트+제목 → 제목+앨범 → 제목만 순서로 검색
+            let terms = [[artist, title], [title, album], [title]]
+                .map { $0.filter { !$0.isEmpty }.joined(separator: " ") }
+                .filter { !$0.isEmpty }
+            for term in NSOrderedSet(array: terms).array as! [String] {
+                let results = await search(term: term)
+                let best = results.flatMap { bestMatch($0, title: title, artist: artist, album: album) }
+                trace.add("③ 카탈로그 검색 '\(term)': " + (results == nil ? "요청 실패(인터넷 연결 확인)"
+                                                         : "\(results!.count)건" + (best?.collectionName.map { " → \($0)" } ?? "")))
+                if let id = best?.collectionId { collectionID = id; break }
             }
         }
         guard let collectionID else { return nil }
-        return await catalogAlbum(collectionID: String(collectionID))
+        let r = await catalogAlbum(collectionID: String(collectionID))
+        trace.add("③ 카탈로그 앨범 \(collectionID) 수록곡: " + (r == nil ? "요청 실패" : "\(r!.tracks.count)곡"))
+        return r
     }
 
     /// 카탈로그 앨범 ID 로 수록곡(디스크/트랙 순)을 받아온다.
@@ -340,12 +375,20 @@ final class MusicLibraryProvider {
         await request("https://itunes.apple.com/lookup", params)
     }
 
+    /// 기기 지역 스토어로 먼저 조회하고, 결과가 없으면 지역 지정 없이(US) 다시 조회한다.
+    /// 반환값 nil = 요청 자체 실패(네트워크 등), [] = 결과 없음.
     private func request(_ base: String, _ params: [String: String]) async -> [ITunesItem]? {
+        let region = Locale.current.region?.identifier
+        let first = await fetch(base, params, country: region)
+        if let first, !first.isEmpty { return first }
+        guard region != nil else { return first }
+        return await fetch(base, params, country: nil) ?? first
+    }
+
+    private func fetch(_ base: String, _ params: [String: String], country: String?) async -> [ITunesItem]? {
         guard var comps = URLComponents(string: base) else { return nil }
         comps.queryItems = params.map { URLQueryItem(name: $0.key, value: $0.value) }
-        if let region = Locale.current.region?.identifier {
-            comps.queryItems?.append(URLQueryItem(name: "country", value: region))
-        }
+        if let country { comps.queryItems?.append(URLQueryItem(name: "country", value: country)) }
         guard let url = comps.url,
               let (data, _) = try? await URLSession.shared.data(from: url),
               let decoded = try? JSONDecoder().decode(ITunesResults.self, from: data) else { return nil }

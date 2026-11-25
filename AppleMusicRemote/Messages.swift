@@ -84,6 +84,10 @@ struct LibraryListMessage: Codable, Equatable {
     var collectionID: String? = nil
     var collectionTitle: String? = nil
     var collectionSubtitle: String? = nil
+    /// 응답한 플레이어 앱의 build 번호 (리모컨과 다르면 경고 표시)
+    var playerBuild: String? = nil
+    /// 찾는 과정 진단(실패 원인 확인용)
+    var detail: String? = nil
 }
 
 /// 플레이어(아이패드) → 리모컨(아이폰) 으로 보내는 현재 재생 상태
