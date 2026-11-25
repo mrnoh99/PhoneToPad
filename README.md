@@ -141,4 +141,4 @@ AppleMusicRemote/
 
 ---
 
-<sub>Developed by JaiSung NOH MD., 2026 · v1.0 (7)</sub>
+<sub>Developed by JaiSung NOH MD., 2026 · v1.0 (8)</sub>
