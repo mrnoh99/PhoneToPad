@@ -10,6 +10,12 @@ enum DeviceRole: String {
     case remote     // 리모컨 (아이폰)
 }
 
+/// 리모컨 화면의 탭
+enum RemoteTab: Hashable {
+    case nowPlaying
+    case library
+}
+
 /// 재생·제어 대상 앱 (아이패드 플레이어 측)
 enum MusicAppSource: String, CaseIterable {
     case music
@@ -53,9 +59,17 @@ final class AppModel: ObservableObject {
     @Published var playback: PlaybackPosition?
     private var playbackReceivedAt = Date()
 
+    /// 리모컨: 현재 선택된 탭 (Now Playing / 라이브러리)
+    @Published var remoteTab: RemoteTab = .nowPlaying
+    /// 리모컨: 플레이어에게 받은 라이브러리 목록 (요청별 캐시)
+    @Published var libraryLists: [LibraryRequest: LibraryListMessage] = [:]
+    /// 리모컨: 응답을 기다리는 요청
+    @Published var libraryLoading: Set<LibraryRequest> = []
+
     let multipeer = MultipeerService()
     let music = MusicController()
     let volume = VolumeController()
+    let library = MusicLibraryProvider()
 
     private var cancellables = Set<AnyCancellable>()
 
@@ -160,6 +174,12 @@ final class AppModel: ObservableObject {
                 self?.playbackReceivedAt = Date()
             }
         }
+        // 리모컨: 라이브러리 목록 수신
+        multipeer.onLibrary = { [weak self] list in
+            guard let self else { return }
+            self.libraryLists[list.request] = list
+            self.libraryLoading.remove(list.request)
+        }
         // 플레이어 곡정보 변동 → 메타데이터/모드 보강 후 전송 + 포인트 컬러 갱신
         music.onNowPlayingChanged = { [weak self] np in
             guard let self else { return }
@@ -211,6 +231,9 @@ final class AppModel: ObservableObject {
         stopPositionUpdates()
         nowPlaying = nil
         playback = nil
+        libraryLists.removeAll()
+        libraryLoading.removeAll()
+        remoteTab = .nowPlaying
         role = .unset
     }
 
@@ -232,6 +255,27 @@ final class AppModel: ObservableObject {
         } else {
             multipeer.send(Packet(command: CommandMessage(command: .seek, seekTime: time)))
         }
+    }
+
+    // MARK: - 리모컨 → 라이브러리 목록 요청 / 재생
+
+    /// 라이브러리 목록을 요청한다. 이미 받아둔 목록이 있으면 force 일 때만 다시 요청.
+    func requestLibrary(_ request: LibraryRequest, force: Bool = false) {
+        guard multipeer.isConnected else { return }
+        if !force, libraryLists[request] != nil { return }
+        if libraryLoading.contains(request) { return }
+        libraryLoading.insert(request)
+        multipeer.send(Packet(command: CommandMessage(command: .requestLibrary, library: request)))
+        // 응답이 오지 않으면(연결 끊김 등) 로딩 표시를 풀어 다시 시도할 수 있게 한다.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
+            self?.libraryLoading.remove(request)
+        }
+    }
+
+    /// 라이브러리 항목을 아이패드에서 재생하고 Now Playing 탭으로 돌아간다.
+    func playLibrary(_ request: PlayLibraryRequest) {
+        multipeer.send(Packet(command: CommandMessage(command: .playLibrary, play: request)))
+        withAnimation { remoteTab = .nowPlaying }
     }
 
     // MARK: - 플레이어 로컬 셔플/반복 토글 (PlayerView 용)
@@ -279,6 +323,17 @@ final class AppModel: ObservableObject {
         case .seek:
             if let t = cmd.seekTime {
                 sp.currentPlaybackTime = t
+                sendPosition()
+            }
+        case .requestLibrary:
+            guard let req = cmd.library else { return }
+            library.list(req) { [weak self] list in
+                self?.multipeer.send(Packet(library: list))
+            }
+        case .playLibrary:
+            guard let req = cmd.play else { return }
+            if library.play(req) {
+                music.publishBurst(force: true)
                 sendPosition()
             }
         }

@@ -22,8 +22,11 @@ iOS 에는 "다른 기기의 Music 앱을 네트워크로 원격 조종" 하는 
 ### 화면 구성 (역할별로 다름)
 - **아이패드(플레이어/중계)**: 화면을 거의 차지하지 않는 **최상단 한 줄 상태바**. Music 앱을
   전체화면(또는 Split View)으로 쓰면서 위에 얇은 바만 얹어 두는 용도.
-- **아이폰/아이패드(리모컨)**: **전체화면 풀 리모컨 UI**(앨범아트 + 트랜스포트 + 볼륨). 어느 기기에서
-  리모컨을 골라도 동일하게 동작합니다.
+- **아이폰/아이패드(리모컨)**: 하단 탭 2개로 구성. 어느 기기에서 리모컨을 골라도 동일하게 동작합니다.
+  - **Now Playing**: 전체화면 풀 리모컨 UI(앨범아트 + 트랜스포트 + 볼륨).
+  - **라이브러리**: 아이패드(플레이어)의 음악 라이브러리 목록을 받아와 표시(플레이리스트 / 앨범 / 노래 + 검색).
+    플레이리스트·앨범을 누르면 수록곡을 받아오고, **재생 / 셔플** 또는 곡을 탭하면 아이패드에서 그 곡부터 재생한 뒤
+    Now Playing 탭으로 돌아갑니다. (아이패드에 미디어 라이브러리 권한 필요, 한 번에 최대 3000개 항목)
 
 ### 연결 경로 & 페어링
 - **전송 경로**: MultipeerConnectivity 가 **인프라 WiFi + P2P WiFi(AWDL) + Bluetooth** 를 자동 병행합니다.
@@ -46,7 +49,9 @@ AppleMusicRemote/
   AppModel.swift                  # 전역 상태 + 네트워크/음악/볼륨 연결
   ContentView.swift               # 역할 선택(+페어링 코드 입력) + 곡 카드(공용)
   PlayerView.swift                # 아이패드 플레이어/중계 화면(최상단 한 줄 바)
-  RemoteControlView.swift         # 리모컨 화면(전체화면 풀 UI)
+  RemoteControlView.swift         # 리모컨 Now Playing 탭(전체화면 풀 UI)
+  MusicLibraryView.swift          # 리모컨 탭 구성 + 라이브러리 목록 탭
+  MusicLibraryProvider.swift      # 플레이어 측 MPMediaQuery 목록 생성 + 큐 재생
   Messages.swift                  # Codable 명령 / 곡정보 패킷
   MultipeerService.swift          # MCSession 송수신 + 페어링 코드/역할 매칭/자동 재연결
   MusicController.swift           # systemMusicPlayer 제어 + 곡정보 관찰

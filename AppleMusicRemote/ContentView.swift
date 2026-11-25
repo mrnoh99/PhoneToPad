@@ -32,7 +32,7 @@ struct ContentView: View {
         case .player:
             PlayerView(music: app.music, net: app.multipeer)
         case .remote:
-            RemoteControlView(app: app, net: app.multipeer)
+            RemoteRootView(app: app, net: app.multipeer)
         }
     }
 }

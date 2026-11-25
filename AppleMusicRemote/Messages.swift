@@ -14,12 +14,68 @@ enum RemoteCommand: String, Codable {
     case toggleRepeat       // 반복 모드 순환(없음→전체→한곡)
     case toggleShuffle      // 셔플 켬/끔
     case seek               // 함께 오는 `seekTime`(초)로 구간 이동
+    case requestLibrary     // 함께 오는 `library` 요청으로 라이브러리 목록 요청
+    case playLibrary        // 함께 오는 `play` 요청으로 라이브러리 항목 재생
 }
 
 struct CommandMessage: Codable {
     var command: RemoteCommand
     var volume: Float? = nil    // setVolume 일 때만 사용
     var seekTime: Double? = nil // seek 일 때만 사용(초)
+    var library: LibraryRequest? = nil      // requestLibrary 일 때만 사용
+    var play: PlayLibraryRequest? = nil     // playLibrary 일 때만 사용
+}
+
+// MARK: - 음악 라이브러리 목록 (리모컨 ↔ 플레이어)
+
+/// 라이브러리 목록 분류
+enum LibraryCategory: String, Codable, CaseIterable, Identifiable {
+    case playlists
+    case albums
+    case songs
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .playlists: return "플레이리스트"
+        case .albums:    return "앨범"
+        case .songs:     return "노래"
+        }
+    }
+}
+
+/// 리모컨 → 플레이어: 목록 요청. collectionID 가 있으면 그 플레이리스트/앨범의 수록곡을 요청.
+struct LibraryRequest: Codable, Hashable {
+    var category: LibraryCategory
+    var collectionID: String? = nil
+}
+
+/// 리모컨 → 플레이어: 재생 요청.
+/// - collectionID 있음: 그 플레이리스트/앨범을 큐로(itemID 가 있으면 그 곡부터)
+/// - collectionID 없음 + songs: 전체 노래를 큐로 하고 itemID 곡부터
+struct PlayLibraryRequest: Codable, Equatable {
+    var category: LibraryCategory
+    var collectionID: String? = nil
+    var itemID: String? = nil
+    var shuffle: Bool? = nil     // true 셔플 켬 / false 셔플 끔 / nil 그대로
+}
+
+/// 목록의 한 항목 (앨범아트 없이 가벼운 텍스트만)
+struct LibraryItem: Codable, Equatable, Identifiable, Hashable {
+    var id: String               // MPMediaEntityPersistentID 문자열
+    var title: String
+    var subtitle: String? = nil  // 아티스트 / 곡 수 등
+    var duration: Double? = nil  // 노래일 때 길이(초)
+    var count: Int? = nil        // 플레이리스트/앨범일 때 곡 수
+}
+
+/// 플레이어 → 리모컨: 목록 응답
+struct LibraryListMessage: Codable, Equatable {
+    var request: LibraryRequest
+    var items: [LibraryItem]
+    var totalCount: Int          // 잘리기 전 전체 개수
+    var error: String? = nil     // 권한 없음 등
 }
 
 /// 플레이어(아이패드) → 리모컨(아이폰) 으로 보내는 현재 재생 상태
@@ -73,4 +129,5 @@ struct Packet: Codable {
     var command: CommandMessage? = nil
     var nowPlaying: NowPlayingMessage? = nil
     var position: PlaybackPosition? = nil
+    var library: LibraryListMessage? = nil
 }
