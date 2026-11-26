@@ -59,6 +59,11 @@ final class AppModel: ObservableObject {
     @Published var playback: PlaybackPosition?
     private var playbackReceivedAt = Date()
 
+    /// 리모컨: 현재 곡 가사 (없으면 nil) / 조회 중 여부
+    @Published var lyrics: Lyrics?
+    @Published var lyricsLoading = false
+    private var lyricsKey: String?
+
     /// 리모컨: 현재 선택된 탭 (Now Playing / 라이브러리)
     @Published var remoteTab: RemoteTab = .nowPlaying
     /// 리모컨: 플레이어에게 받은 라이브러리 목록 (요청별 캐시)
@@ -193,6 +198,7 @@ final class AppModel: ObservableObject {
             DispatchQueue.main.async {
                 self?.nowPlaying = np
                 self?.updateAccent(from: np.artworkJPEG)
+                self?.updateLyrics(for: np)
             }
         }
         // 리모컨: 진행 위치 수신 → 보간용 기준값 저장
@@ -268,6 +274,9 @@ final class AppModel: ObservableObject {
         libraryLists.removeAll()
         libraryLoading.removeAll()
         fetchedAlbumKey = nil
+        lyrics = nil
+        lyricsKey = nil
+        lyricsLoading = false
         remoteTab = .nowPlaying
         role = .unset
     }
@@ -289,6 +298,42 @@ final class AppModel: ObservableObject {
             sendPosition()
         } else {
             multipeer.send(Packet(command: CommandMessage(command: .seek, seekTime: time)))
+        }
+    }
+
+    // MARK: - 리모컨: 가사
+
+    /// 곡이 바뀌면 가사를 다시 찾는다: 곡 내장 가사 → LRCLIB.
+    private func updateLyrics(for np: NowPlayingMessage) {
+        guard role == .remote, !np.title.isEmpty, np.title != "재생 중인 곡 없음" else { return }
+        let key = LyricsService.key(title: np.title, artist: np.artist)
+
+        // 내장 가사는 곡 정보보다 늦게 실려 올 수 있으므로 같은 곡이어도 반영한다.
+        if let embedded = np.lyrics?.trimmingCharacters(in: .whitespacesAndNewlines), !embedded.isEmpty {
+            lyricsKey = key
+            lyricsLoading = false
+            let synced = LyricsService.parseLRC(embedded)
+            let l = Lyrics(plain: synced.isEmpty ? embedded : nil,
+                           synced: synced.isEmpty ? nil : synced,
+                           source: "곡 내장 가사")
+            if lyrics != l { lyrics = l }
+            return
+        }
+        guard key != lyricsKey else { return }
+        lyricsKey = key
+        lyrics = nil
+        lyricsLoading = true
+        let title = np.title, artist = np.artist, album = np.album
+        // 곡 길이를 알면 같이 보내 정확도를 높인다(진행 위치 패킷이 곡 정보보다 늦을 수 있어 잠시 대기)
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 700_000_000)
+            guard let self, self.lyricsKey == key else { return }
+            let duration = self.playback?.duration
+            let found = await LyricsService.shared.lyrics(title: title, artist: artist, album: album,
+                                                          duration: duration)
+            guard self.lyricsKey == key else { return }   // 그새 곡이 바뀌었으면 폐기
+            self.lyrics = found
+            self.lyricsLoading = false
         }
     }
 

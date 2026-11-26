@@ -24,6 +24,9 @@ iOS 에는 "다른 기기의 Music 앱을 네트워크로 원격 조종" 하는 
   전체화면(또는 Split View)으로 쓰면서 위에 얇은 바만 얹어 두는 용도.
 - **아이폰/아이패드(리모컨)**: 하단 탭 2개로 구성. 어느 기기에서 리모컨을 골라도 동일하게 동작합니다.
   - **Now Playing**: 전체화면 풀 리모컨 UI(앨범아트 + 트랜스포트 + 볼륨).
+    현재 곡에 가사가 있으면 **가사** 버튼으로 가사 창을 엽니다. 곡 내장 가사 → 없으면 공개 가사 DB
+    **LRCLIB**(lrclib.net, 아이폰이 곡 제목·아티스트로 조회)에서 찾습니다. 시간 정보가 있는 가사는 현재 줄이
+    강조·자동 스크롤되고, 줄을 탭하면 그 위치로 이동합니다. (Apple Music 자체 가사는 공개 API 가 없어 사용 불가)
   - **라이브러리**: 아이패드(플레이어)의 음악 라이브러리를 받아와 표시(아이패드에 미디어 라이브러리 권한 필요).
     - **플레이리스트**: Apple Music 의 **폴더(트리) 구조 그대로** 표시. 폴더를 누르면 안으로 들어가고,
       플레이리스트를 누르면 수록곡 → **재생 / 셔플** 또는 곡을 탭해 그 곡부터 재생(재생 후 Now Playing 탭으로 이동).
@@ -65,6 +68,8 @@ AppleMusicRemote/
   RemoteControlView.swift         # 리모컨 Now Playing 탭(전체화면 풀 UI)
   MusicLibraryView.swift          # 리모컨 탭 구성 + 라이브러리 목록 탭
   MusicLibraryProvider.swift      # 플레이어 측 MPMediaQuery 목록 생성 + 큐 재생
+  LyricsService.swift             # 가사 조회(곡 내장 → LRCLIB) + LRC 파싱
+  LyricsView.swift                # 가사 버튼 + 가사 창(싱크 가사 강조/탭 이동)
   Messages.swift                  # Codable 명령 / 곡정보 패킷
   MultipeerService.swift          # MCSession 송수신 + 페어링 코드/역할 매칭/자동 재연결
   MusicController.swift           # systemMusicPlayer 제어 + 곡정보 관찰

@@ -12,6 +12,7 @@ struct RemoteControlView: View {
     @State private var draggingVolume = false
     /// 탭 직후 재생/일시정지 아이콘을 바로 바꾸기 위한 낙관적 상태
     @State private var playOverride: Bool?
+    @State private var showLyrics = false
 
     private var isPlaying: Bool { playOverride ?? app.nowPlaying?.isPlaying ?? false }
     private var shuffleOn: Bool { (app.nowPlaying?.shuffleMode ?? 0) == 1 }
@@ -167,6 +168,9 @@ struct RemoteControlView: View {
                 .disabled(!net.isConnected)
                 .opacity(net.isConnected ? 1 : 0.4)
 
+                // 가사 (곡 내장 가사 또는 LRCLIB) — 있을 때만 누를 수 있다
+                LyricsButtonRow(app: app) { showLyrics = true }
+
                 Text(AppInfo.credit)
                     .font(.caption2)
                     .foregroundStyle(.tertiary)
@@ -181,6 +185,7 @@ struct RemoteControlView: View {
             .scrollIndicators(.hidden)
             .scrollBounceBehavior(.basedOnSize)
         }
+        .sheet(isPresented: $showLyrics) { LyricsSheet(app: app) }
         // 플레이어가 보내온 볼륨으로 슬라이더 동기화(드래그 중이 아닐 때만)
         .onChange(of: app.nowPlaying?.volume) { _, newValue in
             if let v = newValue, !draggingVolume { volume = v }
