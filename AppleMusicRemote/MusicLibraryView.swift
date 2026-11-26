@@ -280,7 +280,7 @@ struct LibraryCollectionView: View {
     var body: some View {
         VStack(spacing: 0) {
             CollectionHeader(app: app, title: ref.title, subtitle: ref.subtitle,
-                             enabled: net.isConnected && hasItems, onShowArt: nil) { shuffle in
+                             enabled: net.isConnected && hasItems, onTapArt: nil) { shuffle in
                 app.playLibrary(PlayLibraryRequest(category: ref.category, collectionID: ref.id, shuffle: shuffle))
             }
             LibraryLoadState(app: app, net: net, request: request) { list in
@@ -331,7 +331,9 @@ private struct CurrentAlbumView: View {
                                      title: list?.collectionTitle ?? np?.album ?? "",
                                      subtitle: list?.collectionSubtitle ?? np?.albumArtist ?? np?.artist,
                                      enabled: net.isConnected && collectionID != nil && !(list?.items.isEmpty ?? true),
-                                     onShowArt: { showArt = true }) { shuffle in
+                                     showsArt: true,
+                                     artJPEG: np?.artworkJPEG,
+                                     onTapArt: { showArt = true }) { shuffle in
                         guard let collectionID else { return }
                         app.playLibrary(PlayLibraryRequest(category: .albums, collectionID: collectionID, shuffle: shuffle),
                                         showNowPlaying: false)
@@ -494,45 +496,90 @@ private struct CollectionHeader: View {
     let title: String
     let subtitle: String?
     let enabled: Bool
-    /// 있으면 앨범아트 보기 버튼을 표시
-    var onShowArt: (() -> Void)? = nil
+    /// true 면 왼쪽에 앨범아트를 항상 표시(앨범 탭)
+    var showsArt: Bool = false
+    /// 재생 중에 이미 받아 둔 현재 곡 앨범아트(JPEG)
+    var artJPEG: Data? = nil
+    /// 앨범아트를 탭하면 호출(크게 보기)
+    var onTapArt: (() -> Void)? = nil
     let onPlay: (_ shuffle: Bool) -> Void
 
+    @State private var artImage: UIImage?
+
     var body: some View {
-        VStack(spacing: 4) {
-            Text(title)
-                .font(.headline)
-                .multilineTextAlignment(.center)
-                .lineLimit(2)
-            if let s = subtitle, !s.isEmpty {
-                Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-            }
-            HStack(spacing: 12) {
-                button("재생", icon: "play.fill", shuffle: false)
-                button("셔플", icon: "shuffle", shuffle: true)
-                if let onShowArt {
-                    Button(action: onShowArt) {
-                        Image(systemName: "photo")
-                            .font(.callout.weight(.semibold))
-                            .frame(width: 48)
-                            .padding(.vertical, 10)
-                            .foregroundStyle(app.accent)
-                            .background(Color.white.opacity(0.08), in: RoundedRectangle(cornerRadius: 10))
+        Group {
+            if showsArt {
+                HStack(alignment: .center, spacing: 14) {
+                    artView
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(title)
+                            .font(.headline)
+                            .lineLimit(2)
+                        if let s = subtitle, !s.isEmpty {
+                            Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(2)
+                        }
+                        Spacer(minLength: 4)
+                        HStack(spacing: 8) {
+                            button("재생", icon: "play.fill", shuffle: false)
+                            button("셔플", icon: "shuffle", shuffle: true)
+                        }
                     }
-                    .buttonStyle(.plain)
-                    .accessibilityLabel("앨범아트 보기")
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
+                .frame(height: 120)
+            } else {
+                VStack(spacing: 4) {
+                    Text(title)
+                        .font(.headline)
+                        .multilineTextAlignment(.center)
+                        .lineLimit(2)
+                    if let s = subtitle, !s.isEmpty {
+                        Text(s).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    HStack(spacing: 12) {
+                        button("재생", icon: "play.fill", shuffle: false)
+                        button("셔플", icon: "shuffle", shuffle: true)
+                    }
+                    .padding(.top, 8)
                 }
             }
-            .padding(.top, 8)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
+        // 아트 데이터가 바뀔 때만 백그라운드에서 한 번 디코드
+        .task(id: artJPEG) {
+            let data = artJPEG
+            artImage = await Task.detached(priority: .userInitiated) {
+                data.flatMap { UIImage(data: $0) }
+            }.value
+        }
+    }
+
+    private var artView: some View {
+        Group {
+            if let artImage {
+                Image(uiImage: artImage).resizable().scaledToFill()
+            } else {
+                Color.white.opacity(0.06)
+                    .overlay(Image(systemName: "music.note")
+                        .font(.system(size: 32, weight: .thin))
+                        .foregroundStyle(.secondary))
+            }
+        }
+        .frame(width: 120, height: 120)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.1), lineWidth: 1))
+        .contentShape(Rectangle())
+        .onTapGesture { onTapArt?() }
+        .accessibilityLabel("앨범아트 크게 보기")
+        .accessibilityAddTraits(.isButton)
     }
 
     private func button(_ title: String, icon: String, shuffle: Bool) -> some View {
         Button { onPlay(shuffle) } label: {
             Label(title, systemImage: icon)
                 .font(.callout.weight(.semibold))
+                .lineLimit(1)
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 10)
                 .foregroundStyle(app.accent)
