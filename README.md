@@ -70,6 +70,7 @@ AppleMusicRemote/
   MusicLibraryProvider.swift      # 플레이어 측 MPMediaQuery 목록 생성 + 큐 재생
   LyricsService.swift             # 가사 조회(곡 내장 → LRCLIB) + LRC 파싱
   LyricsView.swift                # 가사 버튼 + 가사 창(싱크 가사 강조/탭 이동)
+  BoundedCache.swift              # 개수 제한(LRU) 캐시 — 가사·앨범아트 캐시 메모리 상한
   Messages.swift                  # Codable 명령 / 곡정보 패킷
   MultipeerService.swift          # MCSession 송수신 + 페어링 코드/역할 매칭/자동 재연결
   MusicController.swift           # systemMusicPlayer 제어 + 곡정보 관찰

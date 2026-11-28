@@ -11,7 +11,8 @@ final class CatalogArtworkFetcher {
 
     struct Result { var artwork: Data?; var info: CatalogInfo? }
 
-    private var cache: [String: Result] = [:]
+    /// 곡별 카탈로그 결과(600px 앨범아트 포함). 메모리 절약을 위해 최근 40곡까지만 보관
+    private let cache = BoundedCache<String, Result>(capacity: 40)
     private var inFlight: Set<String> = []
     private let pixel = 600
 
@@ -28,7 +29,7 @@ final class CatalogArtworkFetcher {
                 completion: @escaping (Result) -> Void) {
         guard !title.isEmpty else { completion(Result()); return }
         let k = key(title, artist, album)
-        if let r = cache[k] { completion(r); return }
+        if let r = cache.value(for: k) { completion(r); return }
         guard !inFlight.contains(k) else { completion(Result()); return }   // 중복 요청 방지
         inFlight.insert(k)
         let pixel = self.pixel
@@ -36,7 +37,7 @@ final class CatalogArtworkFetcher {
             let result = await Self.fetch(title: title, artist: artist, album: album, pixel: pixel)
             await MainActor.run {
                 self.inFlight.remove(k)
-                if result.artwork != nil || result.info != nil { self.cache[k] = result }
+                if result.artwork != nil || result.info != nil { self.cache.set(result, for: k) }
                 completion(result)
             }
         }

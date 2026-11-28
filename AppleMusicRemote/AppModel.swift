@@ -515,14 +515,14 @@ final class AppModel: ObservableObject {
         }
         r.repeatMode = Self.repeatCode(sp.repeatMode)
         r.shuffleMode = (sp.shuffleMode == .off) ? 0 : 1
-        r.catalog = catalogByTrack[trackKey(msg)]   // 카탈로그 정보가 캐시돼 있으면 함께 실어 보냄
+        r.catalog = catalogByTrack.value(for: trackKey(msg))   // 카탈로그 정보가 캐시돼 있으면 함께 실어 보냄
 
         // 앨범아트 안정화: 곡별로 처음 확보한 아트를 고정해, 모든 메시지에 동일하게 싣는다(깜빡임 방지)
         let key = trackKey(msg)
-        if let art = msg.artworkJPEG, !art.isEmpty, artworkByTrack[key] == nil {
-            artworkByTrack[key] = art
+        if let art = msg.artworkJPEG, !art.isEmpty, !artworkByTrack.contains(key) {
+            artworkByTrack.set(art, for: key)
         }
-        if let cached = artworkByTrack[key] { r.artworkJPEG = cached }
+        if let cached = artworkByTrack.value(for: key) { r.artworkJPEG = cached }
         return r
     }
 
@@ -535,9 +535,9 @@ final class AppModel: ObservableObject {
     }
 
     /// 카탈로그(MusicKit/iTunes)에서 상세 정보 + (필요 시)앨범아트를 받아 화면·전송에 반영한다.
-    private var catalogByTrack: [String: CatalogInfo] = [:]
+    private let catalogByTrack = BoundedCache<String, CatalogInfo>(capacity: 200)
     /// 곡별로 확정된 앨범아트(한 번 정해지면 고정 → 빠른 재전송 시 깜빡임 방지)
-    private var artworkByTrack: [String: Data] = [:]
+    private let artworkByTrack = BoundedCache<String, Data>(capacity: 40)
     private func trackKey(_ m: NowPlayingMessage) -> String { "\(m.title)|\(m.artist)".lowercased() }
 
     private func fetchCatalogInfo(for msg: NowPlayingMessage) {
@@ -546,20 +546,20 @@ final class AppModel: ObservableObject {
         guard !title.isEmpty, title != "재생 중인 곡 없음" else { return }
         let k = trackKey(msg)
         // 이미 카탈로그 정보가 있고 확정 아트도 있으면 다시 조회할 필요 없음
-        if catalogByTrack[k] != nil, artworkByTrack[k] != nil { return }
+        if catalogByTrack.contains(k), artworkByTrack.contains(k) { return }
 
         CatalogArtworkFetcher.shared.lookup(title: title, artist: artist, album: album) { [weak self] result in
             guard let self else { return }
             guard self.nowPlaying?.title == title else { return }     // 그새 곡이 바뀌었으면 폐기
-            if let info = result.info { self.catalogByTrack[k] = info }
+            if let info = result.info { self.catalogByTrack.set(info, for: k) }
             // 확정 아트가 아직 없을 때만 카탈로그 아트로 채운다(이후 고정)
-            if self.artworkByTrack[k] == nil, let data = result.artwork, !data.isEmpty {
-                self.artworkByTrack[k] = data
+            if !self.artworkByTrack.contains(k), let data = result.artwork, !data.isEmpty {
+                self.artworkByTrack.set(data, for: k)
                 self.updateAccent(from: data)
             }
 
             var updated = self.nowPlaying ?? msg
-            if let cached = self.artworkByTrack[k] { updated.artworkJPEG = cached }
+            if let cached = self.artworkByTrack.value(for: k) { updated.artworkJPEG = cached }
             if let info = result.info { updated.catalog = info }
             guard updated != self.nowPlaying else { return }
             self.nowPlaying = updated

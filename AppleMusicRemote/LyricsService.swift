@@ -21,7 +21,8 @@ struct Lyrics: Equatable {
 final class LyricsService {
     static let shared = LyricsService()
 
-    private var cache: [String: Lyrics?] = [:]
+    /// 곡별 가사 (nil = 찾아봤지만 없음). 최근 100곡까지만 보관
+    private let cache = BoundedCache<String, Lyrics?>(capacity: 100)
     private let session: URLSession = {
         let config = URLSessionConfiguration.default
         config.timeoutIntervalForRequest = 10
@@ -40,9 +41,9 @@ final class LyricsService {
     @MainActor
     func lyrics(title: String, artist: String, album: String, duration: Double?) async -> Lyrics? {
         let k = Self.key(title: title, artist: artist)
-        if let cached = cache[k] { return cached }
+        if let cached = cache.value(for: k) { return cached }
         let result = await fetchLRCLIB(title: title, artist: artist, album: album, duration: duration)
-        cache[k] = result
+        cache.set(result, for: k)
         return result
     }
 
