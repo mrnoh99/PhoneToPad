@@ -448,7 +448,20 @@ final class MusicLibraryProvider {
 
         // 카탈로그(스트리밍) 앨범: store ID 큐로 재생
         if cid.hasPrefix(Self.storePrefix) {
-            guard let ids = catalogAlbumTracks[cid], !ids.isEmpty else { return false }
+            guard let ids = catalogAlbumTracks[cid], !ids.isEmpty else {
+                // 앱 재시작 등으로 수록곡 캐시가 비었으면 카탈로그에서 다시 받아 온 뒤 재생한다.
+                let albumID = String(cid.dropFirst(Self.storePrefix.count))
+                Task { [weak self] in
+                    guard let self, let album = await self.catalogAlbum(collectionID: albumID) else { return }
+                    let ids = album.tracks.compactMap { $0.trackId.map(String.init) }
+                    await MainActor.run {
+                        guard !ids.isEmpty else { return }
+                        self.catalogAlbumTracks[cid] = ids
+                        self.play(request)
+                    }
+                }
+                return true
+            }
             lastPlayedPlaylistID = nil
             let target = request.itemID.flatMap { id -> String? in
                 id.hasPrefix(Self.storePrefix) ? String(id.dropFirst(Self.storePrefix.count)) : nil

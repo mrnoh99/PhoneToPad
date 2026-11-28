@@ -84,6 +84,18 @@ struct RemoteControlView: View {
                    !np.title.isEmpty, np.title != "재생 중인 곡 없음" {
                     VStack(spacing: compact ? 8 : 12) {
                         NowPlayingCard(np: np, artSize: artSize)
+                            // 라이브러리에서 고른 곡이 준비되는 동안 이전 곡을 흐리게 + 준비 중 표시
+                            .opacity(app.awaitingPlayback ? 0.35 : 1)
+                            .overlay(alignment: .top) {
+                                if app.awaitingPlayback {
+                                    VStack(spacing: 8) {
+                                        ProgressView()
+                                        Text("재생 준비 중…").font(.footnote).foregroundStyle(.secondary)
+                                    }
+                                    .frame(height: artSize)
+                                }
+                            }
+                            .animation(.easeInOut(duration: 0.2), value: app.awaitingPlayback)
                             // 앨범아트 뒤로 포인트 컬러 글로우
                             .background(
                                 Circle()

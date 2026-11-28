@@ -70,6 +70,12 @@ final class AppModel: ObservableObject {
     @Published var libraryLists: [LibraryRequest: LibraryListMessage] = [:]
     /// 리모컨: 응답을 기다리는 요청
     @Published var libraryLoading: Set<LibraryRequest> = []
+    /// 요청별 토큰: 이전 요청의 타임아웃이 새 요청의 로딩 표시를 지우지 않도록 구분한다.
+    private var libraryLoadingTokens: [LibraryRequest: UUID] = [:]
+    /// 리모컨: 라이브러리에서 재생을 요청한 뒤 새 곡 정보가 올 때까지 true (Now Playing 에 '준비 중' 표시)
+    @Published var awaitingPlayback = false
+    private var awaitingFromTitle: String?
+    private var awaitingToken: UUID?
     /// 리모컨: 가장 최근에 연 플레이리스트 (재생 중인 플레이리스트를 못 찾을 때 대신 연다)
     @Published var lastOpenedPlaylist: LibraryCollectionRef? = {
         guard let data = UserDefaults.standard.data(forKey: "lastOpenedPlaylist") else { return nil }
@@ -196,9 +202,13 @@ final class AppModel: ObservableObject {
         // 플레이어 곡정보 수신 → 리모컨 표시 + 포인트 컬러 갱신
         multipeer.onNowPlaying = { [weak self] np in
             DispatchQueue.main.async {
-                self?.nowPlaying = np
-                self?.updateAccent(from: np.artworkJPEG)
-                self?.updateLyrics(for: np)
+                guard let self else { return }
+                self.nowPlaying = np
+                self.updateAccent(from: np.artworkJPEG)
+                self.updateLyrics(for: np)
+                if self.awaitingPlayback, np.title != self.awaitingFromTitle {
+                    self.awaitingPlayback = false
+                }
             }
         }
         // 리모컨: 진행 위치 수신 → 보간용 기준값 저장
@@ -213,6 +223,7 @@ final class AppModel: ObservableObject {
             guard let self else { return }
             self.libraryLists[list.request] = list
             self.libraryLoading.remove(list.request)
+            self.libraryLoadingTokens[list.request] = nil
             // '현재' 요청의 결과는 찾아낸 컬렉션 ID 로도 캐시해 상세 화면이 바로 쓰게 한다.
             if list.request.current == true, let cid = list.collectionID, list.error == nil {
                 var concrete = list
@@ -273,6 +284,8 @@ final class AppModel: ObservableObject {
         playback = nil
         libraryLists.removeAll()
         libraryLoading.removeAll()
+        libraryLoadingTokens.removeAll()
+        awaitingPlayback = false
         fetchedAlbumKey = nil
         lyrics = nil
         lyricsKey = nil
@@ -345,10 +358,15 @@ final class AppModel: ObservableObject {
         if !force, libraryLists[request] != nil { return }
         if libraryLoading.contains(request) { return }
         libraryLoading.insert(request)
+        let token = UUID()
+        libraryLoadingTokens[request] = token
         multipeer.send(Packet(command: CommandMessage(command: .requestLibrary, library: request)))
         // 응답이 오지 않으면(연결 끊김 등) 로딩 표시를 풀어 다시 시도할 수 있게 한다.
+        // 그사이 같은 요청을 다시 보냈다면 그 요청의 타이머가 처리하므로 건드리지 않는다.
         DispatchQueue.main.asyncAfter(deadline: .now() + 15) { [weak self] in
-            self?.libraryLoading.remove(request)
+            guard let self, self.libraryLoadingTokens[request] == token else { return }
+            self.libraryLoadingTokens[request] = nil
+            self.libraryLoading.remove(request)
         }
     }
 
@@ -357,12 +375,23 @@ final class AppModel: ObservableObject {
         let req = LibraryRequest(category: category, current: true)
         libraryLists[req] = nil
         libraryLoading.remove(req)
+        libraryLoadingTokens[req] = nil
         requestLibrary(req, force: true)
     }
 
     /// 라이브러리 항목을 아이패드에서 재생하고 Now Playing 탭으로 돌아간다.
     func playLibrary(_ request: PlayLibraryRequest, showNowPlaying: Bool = true) {
         multipeer.send(Packet(command: CommandMessage(command: .playLibrary, play: request)))
+        // 새 곡 정보가 올 때까지 이전 곡이 그대로 보이지 않도록 '재생 준비 중' 으로 표시한다.
+        awaitingPlayback = true
+        awaitingFromTitle = nowPlaying?.title
+        let token = UUID()
+        awaitingToken = token
+        DispatchQueue.main.asyncAfter(deadline: .now() + 3) { [weak self] in
+            // 같은 곡을 다시 고른 경우 등 제목이 안 바뀌어도 3초 뒤에는 해제
+            guard let self, self.awaitingToken == token else { return }
+            self.awaitingPlayback = false
+        }
         if showNowPlaying { withAnimation { remoteTab = .nowPlaying } }
     }
 
@@ -420,10 +449,9 @@ final class AppModel: ObservableObject {
             }
         case .playLibrary:
             guard let req = cmd.play else { return }
-            if library.play(req) {
-                music.publishBurst(force: true)
-                sendPosition()
-            }
+            // 곡 정보는 재생 준비가 끝난 뒤(onPlaybackStarted) 보낸다.
+            // 여기서 바로 보내면 바뀌기 전 곡이 다시 전송돼 리모컨에 이전 곡이 잠깐 보인다.
+            library.play(req)
         }
     }
 
